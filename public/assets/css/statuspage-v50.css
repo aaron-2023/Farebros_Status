@@ -1,0 +1,54 @@
+/* Fare Brothers public status page v5.0 overlay badges */
+
+.sp-maint-badge {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    margin-top: 8px;
+    padding: 6px 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(120,183,255,.22);
+    background: rgba(47,140,255,.10);
+    color: #d6eaff;
+    font-size: .78rem;
+    font-weight: 900;
+}
+
+.sp-maint-badge::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 99px;
+    margin-right: 7px;
+    background: #78b7ff;
+    box-shadow: 0 0 14px #78b7ff;
+}
+
+.sp-maint-badge.active {
+    border-color: rgba(255,92,122,.30);
+    background: rgba(255,92,122,.10);
+}
+
+.sp-maint-badge.active::before {
+    background: #ff5c7a;
+    box-shadow: 0 0 14px #ff5c7a;
+}
+
+.sp-schedule.upcoming {
+    border-color: rgba(120,183,255,.30);
+    background:
+        radial-gradient(circle at top left, rgba(47,140,255,.10), transparent 24rem),
+        rgba(13,27,47,.8);
+}
+
+.sp-schedule.upcoming strong {
+    color: #78b7ff;
+}
+
+.sp-row-main div {
+    min-width: 0;
+}
+
+.sp-row-status strong {
+    white-space: nowrap;
+}

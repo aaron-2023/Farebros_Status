@@ -1,0 +1,77 @@
+/* Fare Brothers Status settings v4.7 */
+
+.settings-help {
+    display: block;
+    color: var(--fb-muted);
+    margin-top: 7px;
+    line-height: 1.4;
+}
+
+.settings-preview {
+    margin-top: 16px;
+    padding: 15px;
+    border-radius: 18px;
+    border: 1px solid rgba(120,183,255,.16);
+    background: rgba(255,255,255,.035);
+}
+
+.settings-preview strong,
+.settings-preview span {
+    display: block;
+}
+
+.settings-preview strong {
+    color: var(--fb-muted);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    font-size: .72rem;
+}
+
+.settings-preview span {
+    color: var(--fb-text);
+    font-weight: 900;
+    margin-top: 6px;
+}
+
+.settings-time-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.settings-time-grid div {
+    padding: 15px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,.08);
+    background: rgba(255,255,255,.035);
+}
+
+.settings-time-grid small,
+.settings-time-grid strong {
+    display: block;
+}
+
+.settings-time-grid small {
+    color: var(--fb-muted);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    font-size: .7rem;
+    font-weight: 900;
+}
+
+.settings-time-grid strong {
+    margin-top: 7px;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+    .settings-time-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 620px) {
+    .settings-time-grid {
+        grid-template-columns: 1fr;
+    }
+}

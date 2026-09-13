@@ -1,0 +1,121 @@
+/* Fare Brothers Status dashboard v4.6 schedule integration */
+
+.dash-stat-grid-five {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.schedule-dashboard-panel {
+    border-color: rgba(255, 209, 102, 0.28);
+    background:
+        radial-gradient(circle at top left, rgba(255, 209, 102, 0.10), transparent 26rem),
+        linear-gradient(180deg, rgba(13, 27, 47, 0.92), rgba(7, 17, 31, 0.92));
+}
+
+.no-margin {
+    margin-top: 0 !important;
+}
+
+.schedule-dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.schedule-dashboard-box {
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,.085);
+    background: rgba(255,255,255,.035);
+    display: flex;
+    gap: 13px;
+    align-items: flex-start;
+}
+
+.schedule-dashboard-box small,
+.schedule-dashboard-box strong,
+.schedule-dashboard-box p {
+    display: block;
+}
+
+.schedule-dashboard-box small {
+    color: var(--fb-muted);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    font-size: .7rem;
+    font-weight: 900;
+}
+
+.schedule-dashboard-box strong {
+    margin-top: 5px;
+    font-size: 1.1rem;
+}
+
+.schedule-dashboard-box p {
+    margin: 5px 0 0;
+    color: var(--fb-muted);
+    line-height: 1.45;
+}
+
+.schedule-quick-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 14px 0;
+}
+
+.schedule-mini-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.schedule-mini-list article {
+    padding: 13px;
+    border-radius: 17px;
+    border: 1px solid rgba(255,255,255,.075);
+    background: rgba(255,255,255,.032);
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.schedule-mini-list span {
+    width: fit-content;
+    padding: 6px 9px;
+    border-radius: 999px;
+    background: rgba(47,140,255,.08);
+    border: 1px solid rgba(120,183,255,.16);
+    color: var(--fb-blue-soft);
+    font-size: .7rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .09em;
+}
+
+.schedule-mini-list strong,
+.schedule-mini-list small {
+    display: block;
+}
+
+.schedule-mini-list small {
+    color: var(--fb-muted);
+}
+
+@media (max-width: 1300px) {
+    .dash-stat-grid-five {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .schedule-mini-list article {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .dash-stat-grid-five,
+    .schedule-dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+}

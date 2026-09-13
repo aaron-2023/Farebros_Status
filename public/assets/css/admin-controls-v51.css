@@ -1,0 +1,48 @@
+/* Fare Brothers Admin v5.1 controls */
+
+.button.danger {
+    background: rgba(255, 92, 122, 0.12);
+    color: #ffd6de;
+    border: 1px solid rgba(255, 92, 122, 0.28);
+}
+
+.button.danger:hover {
+    background: rgba(255, 92, 122, 0.18);
+}
+
+.control-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.inline-clear {
+    margin: 0;
+}
+
+.pro-card-head .inline-clear {
+    margin-left: auto;
+}
+
+.pro-log form {
+    margin-top: 10px;
+}
+
+.pro-log .control-row form {
+    margin-top: 0;
+}
+
+.pro-card-head {
+    align-items: flex-start;
+}
+
+@media (max-width: 760px) {
+    .pro-card-head {
+        flex-direction: column;
+    }
+
+    .pro-card-head .inline-clear {
+        margin-left: 0;
+    }
+}

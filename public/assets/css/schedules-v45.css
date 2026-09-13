@@ -1,0 +1,98 @@
+/* Fare Brothers Status scheduled maintenance v4.5 */
+
+.schedule-feature {
+    border-color: rgba(255, 209, 102, 0.28);
+    background:
+        radial-gradient(circle at top left, rgba(255, 209, 102, 0.10), transparent 26rem),
+        linear-gradient(180deg, rgba(13, 27, 47, 0.92), rgba(7, 17, 31, 0.92));
+}
+
+.schedule-steps {
+    display: grid;
+    gap: 12px;
+}
+
+.schedule-steps div {
+    padding: 15px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,.08);
+    background: rgba(255,255,255,.035);
+}
+
+.schedule-steps strong,
+.schedule-steps p {
+    display: block;
+}
+
+.schedule-steps p {
+    color: var(--fb-muted);
+    margin: 6px 0 0;
+    line-height: 1.5;
+}
+
+.schedule-list {
+    display: grid;
+    gap: 12px;
+}
+
+.schedule-item {
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,.085);
+    background: rgba(255,255,255,.032);
+}
+
+.schedule-item-main {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: flex-start;
+}
+
+.schedule-phase {
+    display: inline-flex;
+    width: fit-content;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(120,183,255,.2);
+    background: rgba(47,140,255,.08);
+    color: var(--fb-blue-soft);
+    font-size: .74rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .11em;
+    margin-bottom: 10px;
+}
+
+.schedule-item h3 {
+    margin: 0 0 7px;
+    font-size: 1.2rem;
+}
+
+.schedule-item p {
+    color: #c6d5ea;
+    line-height: 1.5;
+    margin-bottom: 9px;
+}
+
+.schedule-item small {
+    color: var(--fb-muted);
+    line-height: 1.5;
+}
+
+.schedule-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+    .schedule-item-main {
+        flex-direction: column;
+    }
+
+    .schedule-actions {
+        justify-content: flex-start;
+    }
+}
