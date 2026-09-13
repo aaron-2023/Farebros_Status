@@ -58,6 +58,62 @@ function normalize_url(string $url): string
     return $url;
 }
 
+
+function sqlite_table_columns(string $table): array
+{
+    static $cache = [];
+    if (isset($cache[$table])) {
+        return $cache[$table];
+    }
+
+    $allowed = ['services', 'websites', 'status_updates', 'announcements', 'settings', 'audit_log'];
+    if (!in_array($table, $allowed, true)) {
+        return [];
+    }
+
+    $rows = db()->query('PRAGMA table_info(' . $table . ')')->fetchAll();
+    $cache[$table] = array_map(static fn(array $row): string => (string)$row['name'], $rows);
+    return $cache[$table];
+}
+
+function ensure_sqlite_column(string $table, string $column, string $definition): void
+{
+    $columns = sqlite_table_columns($table);
+    if (in_array($column, $columns, true)) {
+        return;
+    }
+
+    // Table/column names below are hard-coded by callers, never user input.
+    db()->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+}
+
+function audit_admin_action(?array $user, string $action, string $targetType = '', ?int $targetId = null, string $details = ''): void
+{
+    ensure_core_schema();
+
+    $stmt = db()->prepare('INSERT INTO audit_log (user_id, username, action, target_type, target_id, details, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $user['id'] ?? null,
+        $user['username'] ?? 'system',
+        substr(trim($action), 0, 120),
+        substr(trim($targetType), 0, 80),
+        $targetId,
+        substr(trim($details), 0, 1000),
+        substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 64),
+        substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500),
+    ]);
+}
+
+function get_audit_log(int $limit = 200): array
+{
+    ensure_core_schema();
+    $limit = max(1, min(1000, $limit));
+    $stmt = db()->prepare('SELECT * FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ?');
+    $stmt->bindValue(1, $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+
 function ensure_core_schema(): void
 {
     static $done = false;
@@ -128,6 +184,40 @@ function ensure_core_schema(): void
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ');
+
+    $pdo->exec('
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            action TEXT NOT NULL,
+            target_type TEXT,
+            target_id INTEGER,
+            details TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ');
+
+    ensure_sqlite_column('websites', 'monitor_type', 'TEXT NOT NULL DEFAULT "http"');
+    ensure_sqlite_column('websites', 'monitor_enabled', 'INTEGER NOT NULL DEFAULT 1');
+    ensure_sqlite_column('websites', 'expected_http_code', 'INTEGER');
+    ensure_sqlite_column('websites', 'expected_text', 'TEXT');
+    ensure_sqlite_column('websites', 'tcp_host', 'TEXT');
+    ensure_sqlite_column('websites', 'tcp_port', 'INTEGER');
+    ensure_sqlite_column('websites', 'dns_host', 'TEXT');
+    ensure_sqlite_column('websites', 'response_warn_ms', 'INTEGER');
+    ensure_sqlite_column('websites', 'ssl_check', 'INTEGER NOT NULL DEFAULT 1');
+    ensure_sqlite_column('websites', 'ssl_warn_days', 'INTEGER NOT NULL DEFAULT 21');
+    ensure_sqlite_column('websites', 'pending_status', 'TEXT');
+    ensure_sqlite_column('websites', 'pending_count', 'INTEGER NOT NULL DEFAULT 0');
+    ensure_sqlite_column('websites', 'last_response_ms', 'INTEGER');
+    ensure_sqlite_column('websites', 'last_ssl_days', 'INTEGER');
+    ensure_sqlite_column('websites', 'last_monitor_source', 'TEXT');
+
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_updates_created ON status_updates(created_at DESC)');
 
     seed_default_services();
     seed_default_websites();
@@ -200,6 +290,32 @@ function seed_default_settings(): void
         'company_name' => 'Fare Brothers, LLC',
         'public_admin_link' => '1',
         'status_page_label' => 'Status Center',
+        'monitor_failures_to_offline' => '3',
+        'monitor_successes_to_online' => '2',
+        'monitor_degraded_confirmations' => '2',
+        'monitor_consensus_window_minutes' => '5',
+        'monitor_log_retention_days' => '30',
+        'backup_retention_days' => '7',
+        'backup_enabled' => '1',
+        'last_housekeeping_at' => '',
+        'last_vacuum_at' => '',
+        'smtp_enabled' => '0',
+        'smtp_host' => '',
+        'smtp_port' => '587',
+        'smtp_security' => 'tls',
+        'smtp_username' => '',
+        'smtp_password' => '',
+        'smtp_from_email' => 'status@farebros.com',
+        'smtp_from_name' => 'Fare Brothers Status',
+        'alert_email_enabled' => '0',
+        'alert_email_to' => '',
+        'discord_enabled' => '0',
+        'discord_webhook_url' => '',
+        'discord_username' => 'Fare Brothers Status',
+        'external_monitor_enabled' => '0',
+        'external_monitor_key' => '',
+        'external_monitor_stale_minutes' => '5',
+        'public_history_days' => '90',
     ];
 
     foreach ($defaults as $key => $value) {
@@ -378,13 +494,13 @@ function get_primary_website(): ?array
     return $row ?: null;
 }
 
-function add_website(string $name, string $url, string $description = '', bool $isPrimary = false): void
+function add_website(string $name, string $url, string $description = '', bool $isPrimary = false): int
 {
     ensure_core_schema();
 
     $url = normalize_url($url);
     if ($name === '' || $url === '') {
-        return;
+        return 0;
     }
 
     if ($isPrimary) {
@@ -397,6 +513,7 @@ function add_website(string $name, string $url, string $description = '', bool $
         VALUES (?, ?, ?, "operational", ?, ?)
     ');
     $stmt->execute([$name, $url, $description, $isPrimary ? 1 : 0, 100]);
+    return (int)db()->lastInsertId();
 }
 
 function update_website(int $id, string $name, string $url, string $description, string $status, bool $isPrimary, int $sortOrder): void
@@ -425,6 +542,33 @@ function update_website(int $id, string $name, string $url, string $description,
         $sortOrder,
         $id
     ]);
+}
+
+function update_website_monitor_config(int $id, array $data): void
+{
+    ensure_core_schema();
+    $type = strtolower(trim((string)($data['monitor_type'] ?? 'http')));
+    if (!in_array($type, ['http', 'tcp', 'dns'], true)) {
+        $type = 'http';
+    }
+    $expectedCode = (int)($data['expected_http_code'] ?? 0);
+    $tcpPort = (int)($data['tcp_port'] ?? 0);
+    $responseWarn = (int)($data['response_warn_ms'] ?? 0);
+    $sslWarn = max(1, min(365, (int)($data['ssl_warn_days'] ?? 21)));
+    db()->prepare('UPDATE websites SET monitor_type = ?, monitor_enabled = ?, expected_http_code = ?, expected_text = ?, tcp_host = ?, tcp_port = ?, dns_host = ?, response_warn_ms = ?, ssl_check = ?, ssl_warn_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        ->execute([
+            $type,
+            !empty($data['monitor_enabled']) ? 1 : 0,
+            $expectedCode > 0 ? $expectedCode : null,
+            trim((string)($data['expected_text'] ?? '')),
+            trim((string)($data['tcp_host'] ?? '')),
+            $tcpPort > 0 ? $tcpPort : null,
+            trim((string)($data['dns_host'] ?? '')),
+            $responseWarn > 0 ? $responseWarn : null,
+            !empty($data['ssl_check']) ? 1 : 0,
+            $sslWarn,
+            $id,
+        ]);
 }
 
 function delete_website(int $id): void
@@ -640,6 +784,10 @@ function public_status_payload(): array
                 'last_checked_at' => $website['last_checked_at'],
                 'last_checked_at_iso' => iso_dt($website['last_checked_at']),
                 'last_http_code' => $website['last_http_code'],
+                'last_response_ms' => $website['last_response_ms'] ?? null,
+                'last_ssl_days' => $website['last_ssl_days'] ?? null,
+                'monitor_type' => $website['monitor_type'] ?? 'http',
+                'last_monitor_source' => $website['last_monitor_source'] ?? null,
             ];
         }, $websites),
         'announcements' => get_active_announcements(),

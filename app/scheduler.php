@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/notifications.php';
 
 function ensure_scheduler_schema(): void
 {
@@ -185,6 +186,9 @@ function write_scheduled_update(array $job, string $newStatus, string $phase): v
         (service_id, old_status, new_status, update_title, update_message, created_by)
         VALUES (NULL, NULL, ?, ?, ?, NULL)
     ')->execute([$newStatus, $title, $message]);
+
+    $severity = $phase === 'completed' ? 'resolved' : 'warning';
+    send_status_notifications($title, $message, $severity, 'scheduled_maintenance_' . $phase);
 }
 
 function active_job_payload(): ?array

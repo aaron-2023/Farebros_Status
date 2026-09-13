@@ -30,13 +30,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="utf-8">
     <title>Admin Login - <?= e(APP_NAME) ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="/assets/css/status.css">
+    <meta name="theme-color" content="#07111f">
+    <link rel="stylesheet" href="/assets/css/status-v43.css?v=4.3.0">
+    <link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0">
 </head>
-<body class="admin-body">
-    <main class="login-card">
-        <div class="brand-pill">Fare Brothers Status</div>
-        <h1>Admin Login</h1>
-        <p class="muted">Update service status, announcements, and incident notices.</p>
+<body class="login-v52">
+    <main class="login-panel-v52">
+        <div class="login-brand-v52">
+            <img src="/assets/img/fare-brothers-logo.png" alt="Fare Brothers logo">
+            <span>
+                <strong>Fare Brothers</strong>
+                <small>Status Administration</small>
+            </span>
+        </div>
+
+        <h1>Welcome back</h1>
+        <p class="muted">Manage live system status, website monitoring, announcements, and scheduled maintenance.</p>
 
         <?php if ($error): ?>
             <div class="notice-box danger"><?= e($error) ?></div>
@@ -46,15 +55,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
             <label>Username</label>
-            <input type="text" name="username" autocomplete="username" required>
+            <input type="text" name="username" autocomplete="username" autofocus required>
 
             <label>Password</label>
             <input type="password" name="password" autocomplete="current-password" required>
 
-            <button class="button primary full" type="submit">Login</button>
+            <button class="button primary full" type="submit">Sign In</button>
         </form>
 
-        <a class="sub-link" href="/">Back to public status</a>
+        <div class="login-security-note">This is the administrative control panel for the independent offsite Fare Brothers status service.</div>
+        <a class="sub-link" href="/">← Back to public status</a>
     </main>
 </body>
 </html>

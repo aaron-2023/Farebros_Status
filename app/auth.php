@@ -58,6 +58,7 @@ function login_user(string $username, string $password): bool
     $user = $stmt->fetch();
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
+        audit_admin_action(null, 'login_failed', 'user', null, 'Username: ' . substr($username, 0, 80));
         return false;
     }
 
@@ -66,6 +67,7 @@ function login_user(string $username, string $password): bool
 
     $stmt = db()->prepare('UPDATE users SET last_login_at = datetime("now") WHERE id = ?');
     $stmt->execute([(int)$user['id']]);
+    audit_admin_action($user, 'login_success', 'user', (int)$user['id']);
 
     return true;
 }
@@ -73,6 +75,10 @@ function login_user(string $username, string $password): bool
 function logout_user(): void
 {
     start_secure_session();
+    $user = current_user();
+    if ($user) {
+        audit_admin_action($user, 'logout', 'user', (int)$user['id']);
+    }
 
     $_SESSION = [];
 

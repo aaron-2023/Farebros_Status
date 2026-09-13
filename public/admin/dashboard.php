@@ -18,6 +18,79 @@ $monitorNotice = null;
 $schedulerNotice = null;
 $schedulerError = null;
 
+/**
+ * Collect positive integer IDs from both the normal checkbox array and the
+ * JS-maintained CSV fallback. The fallback makes bulk deletion reliable even
+ * if a browser/theme interferes with normal checkbox serialization.
+ */
+function posted_record_ids(string $arrayKey, string $csvKey): array
+{
+    $ids = [];
+
+    foreach ((array)($_POST[$arrayKey] ?? []) as $value) {
+        $id = (int)$value;
+        if ($id > 0) {
+            $ids[] = $id;
+        }
+    }
+
+    $csv = trim((string)($_POST[$csvKey] ?? ''));
+    if ($csv !== '') {
+        foreach (explode(',', $csv) as $value) {
+            $id = (int)trim($value);
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+    }
+
+    return array_values(array_unique($ids));
+}
+
+/**
+ * Delete the exact requested IDs and verify that those IDs no longer exist
+ * before reporting success.
+ */
+function delete_records_verified(string $table, array $ids): array
+{
+    $allowedTables = ['status_updates', 'monitor_check_log'];
+    if (!in_array($table, $allowedTables, true)) {
+        throw new InvalidArgumentException('Unsupported delete table.');
+    }
+
+    $ids = array_values(array_unique(array_filter(
+        array_map('intval', $ids),
+        static fn(int $id): bool => $id > 0
+    )));
+
+    if (!$ids) {
+        return ['requested' => 0, 'matched' => 0, 'deleted' => 0, 'remaining' => 0];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $pdo = db();
+
+    $beforeStmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE id IN ({$placeholders})");
+    $beforeStmt->execute($ids);
+    $matched = (int)$beforeStmt->fetchColumn();
+
+    if ($matched > 0) {
+        $deleteStmt = $pdo->prepare("DELETE FROM {$table} WHERE id IN ({$placeholders})");
+        $deleteStmt->execute($ids);
+    }
+
+    $afterStmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE id IN ({$placeholders})");
+    $afterStmt->execute($ids);
+    $remaining = (int)$afterStmt->fetchColumn();
+
+    return [
+        'requested' => count($ids),
+        'matched' => $matched,
+        'deleted' => max(0, $matched - $remaining),
+        'remaining' => $remaining,
+    ];
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
 
@@ -62,6 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (?, ?, ?, ?, ?, ?)
             ');
             $stmt->execute([$serviceId, $oldStatus, $newStatus, $title, $message, (int)$user['id']]);
+            send_status_notifications($title, $message !== '' ? $message : ('Status changed from ' . $oldStatus . ' to ' . $newStatus . '.'), $newStatus === 'operational' ? 'resolved' : 'warning', 'manual_status_change');
 
             $notice = 'Service status updated.';
 
@@ -72,7 +146,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'add_website') {
-        add_website(trim($_POST['website_name'] ?? ''), trim($_POST['website_url'] ?? ''), trim($_POST['website_description'] ?? ''), !empty($_POST['is_primary']));
+        $newWebsiteId = add_website(trim($_POST['website_name'] ?? ''), trim($_POST['website_url'] ?? ''), trim($_POST['website_description'] ?? ''), !empty($_POST['is_primary']));
+        if ($newWebsiteId > 0) {
+            $_POST['monitor_enabled'] = '1';
+            if (!isset($_POST['ssl_check'])) $_POST['ssl_check'] = '1';
+            update_website_monitor_config($newWebsiteId, $_POST);
+        }
         $notice = 'Website added.';
     }
 
@@ -86,6 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             !empty($_POST['is_primary']),
             (int)($_POST['sort_order'] ?? 100)
         );
+        update_website_monitor_config((int)($_POST['website_id'] ?? 0), $_POST);
         $notice = 'Website updated.';
     }
 
@@ -142,6 +222,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($action === 'delete_selected_updates') {
+        $ids = posted_record_ids('update_ids', 'selected_update_ids');
+
+        if ($ids) {
+            $result = delete_records_verified('status_updates', $ids);
+
+            if ($result['remaining'] > 0) {
+                $notice = "Delete verification failed: {$result['remaining']} selected status update(s) are still in the database.";
+            } elseif ($result['deleted'] > 0) {
+                $deleted = (int)$result['deleted'];
+                $notice = $deleted === 1
+                    ? '1 status update permanently deleted and verified.'
+                    : number_format($deleted) . ' status updates permanently deleted and verified.';
+
+                if (platform_sync_enabled()) {
+                    $syncNotice = sync_status_snapshot_to_platform('status_updates_bulk_deleted') ? 'Portal sync sent.' : 'Portal sync failed or was skipped. Check sync log.';
+                }
+            } else {
+                $notice = 'The selected status updates were already gone; nothing remained to delete.';
+            }
+        } else {
+            $notice = 'No status updates were selected.';
+        }
+    }
+
     if ($action === 'clear_old_updates') {
         $keep = max(0, (int)($_POST['keep_updates'] ?? 10));
         $stmt = db()->prepare("
@@ -157,13 +262,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'delete_monitor_log') {
         $id = (int)($_POST['monitor_log_id'] ?? 0);
-        db()->prepare('DELETE FROM monitor_check_logs WHERE id = ?')->execute([$id]);
+        db()->prepare('DELETE FROM monitor_check_log WHERE id = ?')->execute([$id]);
         $notice = 'Monitor log entry deleted.';
     }
 
+    if ($action === 'delete_selected_monitor_logs') {
+        $ids = posted_record_ids('monitor_log_ids', 'selected_monitor_log_ids');
+
+        if ($ids) {
+            $result = delete_records_verified('monitor_check_log', $ids);
+
+            if ($result['remaining'] > 0) {
+                $notice = "Delete verification failed: {$result['remaining']} selected monitor log entry/entries are still in the database.";
+            } elseif ($result['deleted'] > 0) {
+                $deleted = (int)$result['deleted'];
+                $notice = $deleted === 1
+                    ? '1 monitor log entry permanently deleted and verified.'
+                    : number_format($deleted) . ' monitor log entries permanently deleted and verified.';
+            } else {
+                $notice = 'The selected monitor log entries were already gone; nothing remained to delete.';
+            }
+        } else {
+            $notice = 'No monitor log entries were selected.';
+        }
+    }
+
     if ($action === 'clear_monitor_logs') {
-        db()->exec('DELETE FROM monitor_check_logs');
-        $notice = 'Monitor logs cleared.';
+        $before = (int)db()->query('SELECT COUNT(*) FROM monitor_check_log')->fetchColumn();
+        db()->exec('DELETE FROM monitor_check_log');
+        $after = (int)db()->query('SELECT COUNT(*) FROM monitor_check_log')->fetchColumn();
+        $deleted = max(0, $before - $after);
+        $notice = number_format($deleted) . ' monitor log entries permanently deleted. New checks may appear immediately while automatic monitoring is enabled.';
     }
 
     if ($action === 'manual_run_monitor') {
@@ -179,14 +308,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $schedulerError = $ex->getMessage();
         }
     }
+
+    if ($action !== '') {
+        audit_admin_action($user, $action, 'dashboard');
+    }
 }
 
 $payload = public_status_payload();
 $services = get_services();
 $websites = get_websites();
 $announcements = db()->query('SELECT * FROM announcements ORDER BY created_at DESC LIMIT 20')->fetchAll();
-$updates = get_recent_updates(20);
-$monitorLogs = get_recent_monitor_logs(10);
+$updates = get_recent_updates(50);
+$monitorLogs = get_recent_monitor_logs(50);
+$totalUpdates = (int)db()->query('SELECT COUNT(*) FROM status_updates')->fetchColumn();
+$totalMonitorLogs = (int)db()->query('SELECT COUNT(*) FROM monitor_check_log')->fetchColumn();
 $statusMessage = get_setting('status_message', '');
 $primary = $payload['primary'];
 $overall = $payload['overall'];
@@ -194,6 +329,9 @@ $overall = $payload['overall'];
 $activeAnnouncements = array_filter($announcements, fn($a) => (int)$a['is_active'] === 1);
 $offlineWebsites = array_filter($websites, fn($w) => ($w['current_status'] ?? '') !== 'operational');
 $lastMonitor = $monitorLogs[0] ?? null;
+$activeIncidents = get_active_incidents();
+$monitorSources = get_monitor_source_health();
+$healthyMonitorSources = array_filter($monitorSources, static fn($source) => empty($source['is_stale']));
 
 $schedules = [];
 $activeJob = null;
@@ -217,6 +355,7 @@ if ($hasScheduler) {
     <link rel="stylesheet" href="/assets/css/status-v43.css?v=4.3.0">
     <link rel="stylesheet" href="/assets/css/admin-pro-v48.css?v=4.8.0">
     <link rel="stylesheet" href="/assets/css/admin-controls-v51.css?v=5.1.0">
+    <link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0">
 </head>
 <body class="admin-pro">
     <aside class="pro-sidebar">
@@ -236,6 +375,8 @@ if ($hasScheduler) {
             <div class="pro-nav-group">
                 <small>Manage</small>
                 <?php if ($hasScheduler): ?><a href="/admin/schedules.php"><span>🗓</span>Schedules</a><?php endif; ?>
+                <a href="/admin/incidents.php"><span>⚠</span>Incidents</a>
+                <a href="/admin/analytics.php"><span>⌁</span>Analytics</a>
                 <a href="#websites"><span>🌐</span>Websites</a>
                 <a href="#updates"><span>📣</span>Updates</a>
             </div>
@@ -243,6 +384,7 @@ if ($hasScheduler) {
             <div class="pro-nav-group">
                 <small>Admin</small>
                 <a href="/admin/settings.php"><span>⚙</span>Settings</a>
+                <a href="/admin/audit-log.php"><span>☷</span>Audit Log</a>
                 <a href="/admin/change-password.php"><span>🔒</span>Password</a>
                 <a href="/admin/logout.php"><span>⎋</span>Logout</a>
             </div>
@@ -258,6 +400,8 @@ if ($hasScheduler) {
             </div>
 
             <div class="pro-top-actions">
+                <a class="button ghost" href="/admin/incidents.php">Incidents</a>
+                <a class="button ghost" href="/admin/analytics.php">Analytics</a>
                 <a class="button ghost" href="/admin/settings.php">Settings</a>
                 <?php if ($hasScheduler): ?><a class="button ghost" href="/admin/schedules.php">Schedule Manager</a><?php endif; ?>
                 <a class="button primary" href="/" target="_blank">View Public Page</a>
@@ -304,6 +448,12 @@ if ($hasScheduler) {
                 <small>Last Check</small>
                 <strong><?= $lastMonitor ? e(format_dt($lastMonitor['created_at'])) : 'Pending' ?></strong>
                 <em><?= $lastMonitor ? e($lastMonitor['website_name'] ?? 'Website') : 'No checks yet' ?></em>
+            </article>
+            <article class="<?= $activeIncidents ? 'bad' : 'good' ?>">
+                <span class="pro-icon">⚠</span><small>Active Incidents</small><strong><?= count($activeIncidents) ?></strong><em><?= $activeIncidents ? 'Needs attention' : 'No active incidents' ?></em>
+            </article>
+            <article class="<?= count($healthyMonitorSources) >= 2 ? 'good' : 'maintenance' ?>">
+                <span class="pro-icon">◎</span><small>Monitor Sources</small><strong><?= count($healthyMonitorSources) ?> Active</strong><em><?= count($healthyMonitorSources) >= 2 ? 'Redundant checks online' : 'Single-source monitoring' ?></em>
             </article>
         </section>
 
@@ -362,6 +512,14 @@ if ($hasScheduler) {
                     <input type="url" name="website_url" placeholder="https://example.com" required>
                     <label>Description</label>
                     <input type="text" name="website_description" placeholder="Short public note">
+                    <label>Monitor type</label>
+                    <select name="monitor_type"><option value="http">HTTP / HTTPS</option><option value="tcp">TCP port</option><option value="dns">DNS lookup</option></select>
+                    <div class="pro-form-row"><div><label>Response warning (ms)</label><input type="number" name="response_warn_ms" min="0" placeholder="2500"></div><div><label>Expected HTTP code</label><input type="number" name="expected_http_code" min="100" max="599" placeholder="200"></div></div>
+                    <label>Expected page text (optional)</label><input type="text" name="expected_text" placeholder="Text that must appear on a healthy HTTP page">
+                    <div class="pro-form-row"><div><label>TCP host (for TCP monitor)</label><input type="text" name="tcp_host" placeholder="server.example.com"></div><div><label>TCP port</label><input type="number" name="tcp_port" min="1" max="65535" placeholder="443"></div></div>
+                    <label>DNS hostname (for DNS monitor)</label><input type="text" name="dns_host" placeholder="example.com">
+                    <div class="pro-form-row"><div><label>SSL warning (days)</label><input type="number" name="ssl_warn_days" min="1" max="365" value="21"></div><div></div></div>
+                    <label class="pro-check"><input type="checkbox" name="ssl_check" value="1" checked>Check SSL certificate expiration</label>
                     <label class="pro-check"><input type="checkbox" name="is_primary" value="1">Make primary website</label>
                     <button class="button primary" type="submit">Add Website</button>
                 </form>
@@ -388,7 +546,7 @@ if ($hasScheduler) {
                     <details class="pro-website <?= e($meta['class']) ?>">
                         <summary>
                             <span class="fb-dot"></span>
-                            <span><strong><?= e($website['website_name']) ?><?= $website['is_primary'] ? ' · Primary' : '' ?></strong><small><?= e($website['website_url']) ?></small></span>
+                            <span><strong><?= e($website['website_name']) ?><?= $website['is_primary'] ? ' · Primary' : '' ?> <small class="pro-inline-id">#<?= (int)$website['id'] ?></small></strong><small><?= e($website['website_url']) ?></small></span>
                             <em><?= e($meta['label']) ?></em>
                         </summary>
 
@@ -417,6 +575,19 @@ if ($hasScheduler) {
                                 <div><label>Sort order</label><input type="number" name="sort_order" value="<?= (int)$website['sort_order'] ?>"></div>
                             </div>
 
+                            <div class="pro-monitor-config">
+                                <h4>Monitor Configuration</h4>
+                                <div class="pro-form-row">
+                                    <div><label>Monitor type</label><select name="monitor_type"><option value="http" <?= ($website['monitor_type'] ?? 'http') === 'http' ? 'selected' : '' ?>>HTTP / HTTPS</option><option value="tcp" <?= ($website['monitor_type'] ?? '') === 'tcp' ? 'selected' : '' ?>>TCP Port</option><option value="dns" <?= ($website['monitor_type'] ?? '') === 'dns' ? 'selected' : '' ?>>DNS Lookup</option></select></div>
+                                    <div><label>Response warning (ms)</label><input type="number" name="response_warn_ms" min="0" value="<?= e((string)($website['response_warn_ms'] ?? '')) ?>" placeholder="2500"></div>
+                                </div>
+                                <div class="pro-form-row"><div><label>Expected HTTP code</label><input type="number" name="expected_http_code" min="100" max="599" value="<?= e((string)($website['expected_http_code'] ?? '')) ?>" placeholder="200"></div><div><label>SSL warning (days)</label><input type="number" name="ssl_warn_days" min="1" max="365" value="<?= (int)($website['ssl_warn_days'] ?? 21) ?>"></div></div>
+                                <label>Expected page text</label><input type="text" name="expected_text" value="<?= e((string)($website['expected_text'] ?? '')) ?>" placeholder="Optional content check">
+                                <div class="pro-form-row"><div><label>TCP host</label><input type="text" name="tcp_host" value="<?= e((string)($website['tcp_host'] ?? '')) ?>" placeholder="server.example.com"></div><div><label>TCP port</label><input type="number" name="tcp_port" min="1" max="65535" value="<?= e((string)($website['tcp_port'] ?? '')) ?>"></div></div>
+                                <label>DNS hostname</label><input type="text" name="dns_host" value="<?= e((string)($website['dns_host'] ?? '')) ?>" placeholder="example.com">
+                                <div class="pro-check-row"><label class="pro-check"><input type="checkbox" name="monitor_enabled" value="1" <?= (int)($website['monitor_enabled'] ?? 1) === 1 ? 'checked' : '' ?>>Automatic monitoring enabled</label><label class="pro-check"><input type="checkbox" name="ssl_check" value="1" <?= (int)($website['ssl_check'] ?? 1) === 1 ? 'checked' : '' ?>>SSL expiration check</label></div>
+                                <small class="pro-field-hint">Current: <?= e(strtoupper((string)($website['monitor_type'] ?? 'http'))) ?> · Last response <?= isset($website['last_response_ms']) && $website['last_response_ms'] !== null ? (int)$website['last_response_ms'] . 'ms' : 'n/a' ?><?= isset($website['last_ssl_days']) && $website['last_ssl_days'] !== null ? ' · SSL ' . (int)$website['last_ssl_days'] . ' days' : '' ?></small>
+                            </div>
                             <label class="pro-check"><input type="checkbox" name="is_primary" value="1" <?= $website['is_primary'] ? 'checked' : '' ?>>Primary Fare Brothers website</label>
                             <div class="pro-actions"><button class="button primary" type="submit">Save Website</button></div>
                         </form>
@@ -464,78 +635,208 @@ if ($hasScheduler) {
             </article>
         </section>
 
-        <section class="pro-grid pro-grid-three">
-            <article class="pro-card">
-                <div class="pro-card-head"><h2>Announcements</h2></div>
-                <?php if (!$announcements): ?><p class="empty">No announcements yet.</p><?php endif; ?>
-                <?php foreach ($announcements as $item): ?>
-                    <div class="pro-log">
-                        <strong><?= e($item['title']) ?></strong>
-                        <p><?= e(mb_strimwidth($item['body'], 0, 120, '...')) ?></p>
-                        <small><?= $item['is_active'] ? 'Active' : 'Hidden' ?> · <?= e(format_dt($item['created_at'])) ?></small>
-                        <div class="control-row">
-                            <form method="post">
-                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                <input type="hidden" name="action" value="toggle_announcement">
-                                <input type="hidden" name="announcement_id" value="<?= (int)$item['id'] ?>">
-                                <button class="button ghost small" type="submit"><?= $item['is_active'] ? 'Hide' : 'Show' ?></button>
-                            </form>
-                            <form method="post" onsubmit="return confirm('Delete this announcement permanently?');">
-                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                <input type="hidden" name="action" value="delete_announcement">
-                                <input type="hidden" name="announcement_id" value="<?= (int)$item['id'] ?>">
-                                <button class="button danger small" type="submit">Delete</button>
-                            </form>
-                        </div>
+        <section class="pro-grid pro-grid-three activity-grid">
+            <article class="pro-card activity-card">
+                <div class="pro-card-head activity-card-head">
+                    <div>
+                        <h2>Announcements</h2>
+                        <p><?= count($announcements) ?> recent announcement<?= count($announcements) === 1 ? '' : 's' ?></p>
                     </div>
-                <?php endforeach; ?>
+                </div>
+                <?php if (!$announcements): ?><p class="empty">No announcements yet.</p><?php endif; ?>
+                <?php if ($announcements): ?>
+                    <div class="activity-scroll announcement-list">
+                        <?php foreach ($announcements as $item): ?>
+                            <div class="pro-log activity-row announcement-row">
+                                <strong><?= e($item['title']) ?></strong>
+                                <p><?= e(mb_strimwidth($item['body'], 0, 120, '...')) ?></p>
+                                <small><?= $item['is_active'] ? 'Active' : 'Hidden' ?> · <?= e(format_dt($item['created_at'])) ?></small>
+                                <div class="control-row">
+                                    <form method="post">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="toggle_announcement">
+                                        <input type="hidden" name="announcement_id" value="<?= (int)$item['id'] ?>">
+                                        <button class="button ghost small" type="submit"><?= $item['is_active'] ? 'Hide' : 'Show' ?></button>
+                                    </form>
+                                    <form method="post" onsubmit="return confirm('Delete this announcement permanently?');">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <input type="hidden" name="action" value="delete_announcement">
+                                        <input type="hidden" name="announcement_id" value="<?= (int)$item['id'] ?>">
+                                        <button class="button danger small" type="submit">Delete</button>
+                                    </form>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
             </article>
 
-            <article class="pro-card">
-                <div class="pro-card-head">
-                    <h2>Recent Updates</h2>
+            <article class="pro-card activity-card">
+                <div class="pro-card-head activity-card-head">
+                    <div>
+                        <h2>Recent Updates</h2>
+                        <p>Showing <?= number_format(count($updates)) ?> of <?= number_format($totalUpdates) ?> total updates. Select multiple entries for fast cleanup.</p>
+                    </div>
                     <form method="post" class="inline-clear" onsubmit="return confirm('Clear old status updates and keep only the latest 10?');">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="action" value="clear_old_updates">
                         <input type="hidden" name="keep_updates" value="10">
-                        <button class="button ghost small" type="submit">Keep Latest 10</button>
+                        <button class="button ghost small nowrap" type="submit">Keep Latest 10</button>
                     </form>
                 </div>
                 <?php if (!$updates): ?><p class="empty">No recent updates.</p><?php endif; ?>
-                <?php foreach ($updates as $item): ?>
-                    <div class="pro-log">
-                        <strong><?= e($item['update_title']) ?></strong>
-                        <p><?= e($item['update_message']) ?></p>
-                        <small><?= e($item['service_name'] ?? 'General') ?> · <?= e(format_dt($item['created_at'])) ?></small>
-                        <form method="post" onsubmit="return confirm('Delete this status update permanently?');">
-                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                            <input type="hidden" name="action" value="delete_update">
-                            <input type="hidden" name="update_id" value="<?= (int)$item['id'] ?>">
-                            <button class="button danger small" type="submit">Delete Update</button>
-                        </form>
-                    </div>
-                <?php endforeach; ?>
+                <?php if ($updates): ?>
+                    <form method="post" id="updatesBulkForm" class="bulk-delete-form" onsubmit="return confirmUpdatesBulkDelete();">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="action" value="delete_selected_updates">
+                        <input type="hidden" name="selected_update_ids" id="selectedUpdateIds" value="">
+
+                        <div class="bulk-toolbar">
+                            <label class="bulk-select-all">
+                                <input type="checkbox" id="updatesSelectAll">
+                                <span>Select all shown</span>
+                            </label>
+                            <span class="bulk-selected-count" id="updatesSelectedCount">0 selected</span>
+                            <button class="button danger small nowrap" id="updatesDeleteSelected" type="submit" disabled>Delete Selected</button>
+                        </div>
+
+                        <div class="activity-scroll bulk-list" id="updatesList">
+                            <?php foreach ($updates as $item): ?>
+                                <label class="pro-log activity-row bulk-row update-row">
+                                    <span class="bulk-check">
+                                        <input class="updates-checkbox" type="checkbox" name="update_ids[]" value="<?= (int)$item['id'] ?>" data-record-id="<?= (int)$item['id'] ?>">
+                                    </span>
+                                    <span class="bulk-content">
+                                        <strong><?= e($item['update_title']) ?></strong>
+                                        <?php if (trim((string)$item['update_message']) !== ''): ?><p><?= e($item['update_message']) ?></p><?php endif; ?>
+                                        <small><?= e($item['service_name'] ?? 'General') ?> · <?= e(format_dt($item['created_at'])) ?></small>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </form>
+                <?php endif; ?>
             </article>
 
-            <article class="pro-card">
-                <div class="pro-card-head">
-                    <h2>Monitor Log</h2>
-                    <form method="post" class="inline-clear" onsubmit="return confirm('Clear all monitor logs?');">
+            <article class="pro-card activity-card monitor-card">
+                <div class="pro-card-head activity-card-head monitor-log-head">
+                    <div>
+                        <h2>Monitor Log</h2>
+                        <p>Showing <?= number_format(count($monitorLogs)) ?> of <?= number_format($totalMonitorLogs) ?> total checks. Select multiple entries for fast cleanup.</p>
+                    </div>
+                    <form method="post" class="inline-clear" onsubmit="return confirm('Clear ALL monitor logs? This cannot be undone.');">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="action" value="clear_monitor_logs">
-                        <button class="button ghost small" type="submit">Clear Logs</button>
+                        <button class="button ghost small nowrap" type="submit">Clear All Logs</button>
                     </form>
                 </div>
                 <?php if (!$monitorLogs): ?><p class="empty">No monitor checks yet.</p><?php endif; ?>
-                <?php foreach ($monitorLogs as $item): ?>
-                    <div class="pro-log">
-                        <strong><?= e($item['website_name'] ?? 'Unknown Website') ?> · <?= e($item['result']) ?></strong>
-                        <p>HTTP: <?= e((string)($item['http_code'] ?? 'none')) ?> · <?= e((string)($item['response_ms'] ?? '')) ?>ms<?php if ($item['error_message']): ?><br><?= e($item['error_message']) ?><?php endif; ?></p>
-                        <small><?= e(format_dt($item['created_at'])) ?></small>
-                    </div>
-                <?php endforeach; ?>
+                <?php if ($monitorLogs): ?>
+                    <form method="post" id="monitorBulkForm" class="bulk-delete-form" onsubmit="return confirmMonitorBulkDelete();">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="action" value="delete_selected_monitor_logs">
+                        <input type="hidden" name="selected_monitor_log_ids" id="selectedMonitorLogIds" value="">
+
+                        <div class="bulk-toolbar">
+                            <label class="bulk-select-all">
+                                <input type="checkbox" id="monitorSelectAll">
+                                <span>Select all shown</span>
+                            </label>
+                            <span class="bulk-selected-count" id="monitorSelectedCount">0 selected</span>
+                            <button class="button danger small nowrap" id="monitorDeleteSelected" type="submit" disabled>Delete Selected</button>
+                        </div>
+
+                        <div class="activity-scroll bulk-list" id="monitorLogList">
+                            <?php foreach ($monitorLogs as $item): ?>
+                                <label class="pro-log activity-row bulk-row monitor-log-row">
+                                    <span class="bulk-check">
+                                        <input class="monitor-log-checkbox" type="checkbox" name="monitor_log_ids[]" value="<?= (int)$item['id'] ?>" data-record-id="<?= (int)$item['id'] ?>">
+                                    </span>
+                                    <span class="bulk-content monitor-log-content">
+                                        <span class="pro-log-status <?= e(($item['result'] ?? '') === 'online' ? 'online' : 'offline') ?>"><i></i><?= e($item['result'] ?? 'unknown') ?></span>
+                                        <strong><?= e($item['website_name'] ?? $item['service_name'] ?? 'Unknown Target') ?></strong>
+                                        <p><?= e(strtoupper((string)($item['monitor_type'] ?? 'http'))) ?> · <?= e((string)($item['source'] ?? 'local')) ?> · HTTP: <?= e((string)($item['http_code'] ?? 'none')) ?> · <?= e((string)($item['response_ms'] ?? '')) ?>ms<?php if ($item['error_message']): ?><br><?= e($item['error_message']) ?><?php endif; ?></p>
+                                        <small><?= e(format_dt($item['created_at'])) ?></small>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </form>
+                <?php endif; ?>
             </article>
         </section>
     </main>
+    <script>
+    (() => {
+        const wireBulkDelete = ({
+            selectAllId,
+            checkboxSelector,
+            countId,
+            deleteId,
+            rowSelector,
+            confirmName,
+            noun,
+            hiddenId
+        }) => {
+            const selectAll = document.getElementById(selectAllId);
+            const checkboxes = Array.from(document.querySelectorAll(checkboxSelector));
+            const countLabel = document.getElementById(countId);
+            const deleteButton = document.getElementById(deleteId);
+            const hiddenIds = document.getElementById(hiddenId);
+
+            if (!selectAll || !checkboxes.length || !countLabel || !deleteButton || !hiddenIds) return;
+
+            const refresh = () => {
+                const selectedBoxes = checkboxes.filter((box) => box.checked);
+                const selected = selectedBoxes.length;
+                hiddenIds.value = selectedBoxes.map((box) => box.dataset.recordId || box.value).join(',');
+                countLabel.textContent = `${selected} selected`;
+                deleteButton.disabled = selected === 0;
+                selectAll.checked = selected === checkboxes.length;
+                selectAll.indeterminate = selected > 0 && selected < checkboxes.length;
+
+                checkboxes.forEach((box) => {
+                    box.closest(rowSelector)?.classList.toggle('selected', box.checked);
+                });
+            };
+
+            selectAll.addEventListener('change', () => {
+                checkboxes.forEach((box) => { box.checked = selectAll.checked; });
+                refresh();
+            });
+
+            checkboxes.forEach((box) => box.addEventListener('change', refresh));
+            refresh();
+
+            window[confirmName] = () => {
+                const selected = checkboxes.filter((box) => box.checked).length;
+                if (!selected) return false;
+                return confirm(`Delete ${selected} selected ${noun}${selected === 1 ? '' : 's'}? This cannot be undone.`);
+            };
+        };
+
+        wireBulkDelete({
+            selectAllId: 'updatesSelectAll',
+            checkboxSelector: '.updates-checkbox',
+            countId: 'updatesSelectedCount',
+            deleteId: 'updatesDeleteSelected',
+            rowSelector: '.update-row',
+            confirmName: 'confirmUpdatesBulkDelete',
+            noun: 'status update',
+            hiddenId: 'selectedUpdateIds'
+        });
+
+        wireBulkDelete({
+            selectAllId: 'monitorSelectAll',
+            checkboxSelector: '.monitor-log-checkbox',
+            countId: 'monitorSelectedCount',
+            deleteId: 'monitorDeleteSelected',
+            rowSelector: '.monitor-log-row',
+            confirmName: 'confirmMonitorBulkDelete',
+            noun: 'monitor log entry',
+            hiddenId: 'selectedMonitorLogIds'
+        });
+    })();
+    </script>
 </body>
 </html>
