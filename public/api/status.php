@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../app/functions.php';
+require_once __DIR__ . '/../../app/monitor.php';
 
 $schedule = null;
 if (file_exists(__DIR__ . '/../../app/scheduler.php')) {
@@ -35,7 +35,7 @@ if (file_exists(__DIR__ . '/../../app/scheduler.php')) {
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
-$payload = public_status_payload();
+$payload = public_monitoring_enrichment(public_status_payload());
 $payload['schedule'] = $schedule;
 
 if ($schedule && file_exists(__DIR__ . '/../../app/scheduler.php')) {

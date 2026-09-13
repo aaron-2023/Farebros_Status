@@ -34,6 +34,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $actions = apply_scheduled_jobs();
             $notice = 'Scheduler checked. Actions: ' . (empty($actions) ? 'none' : implode(', ', $actions));
         }
+        if ($action !== '') {
+            audit_admin_action($user, $action, 'schedule', isset($_POST['schedule_id']) ? (int)$_POST['schedule_id'] : null);
+        }
     } catch (Throwable $ex) {
         $error = $ex->getMessage();
     }
@@ -42,12 +45,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $schedules = get_scheduled_jobs();
 $activeJob = active_job_payload();
 $upcomingJob = upcoming_job_payload();
+$services = get_services();
+$websites = get_websites();
 
 function schedule_phase(array $job): string
 {
-    $now = time();
-    $start = strtotime($job['start_at']);
-    $end = strtotime($job['end_at']);
+    $utc = new DateTimeZone('UTC');
+    $now = new DateTimeImmutable('now', $utc);
+    $start = new DateTimeImmutable((string)$job['start_at'], $utc);
+    $end = new DateTimeImmutable((string)$job['end_at'], $utc);
 
     if ((int)$job['has_completed'] === 1) {
         return 'Completed';
@@ -67,6 +73,35 @@ function schedule_phase(array $job): string
 
     return 'Ending';
 }
+
+function schedule_scope_label(array $job, array $services, array $websites): string
+{
+    $scope = (string)($job['scope'] ?? 'all');
+
+    if ($scope === 'all') return 'Everything';
+    if ($scope === 'services') return 'All services';
+    if ($scope === 'websites') return 'All websites';
+
+    if ($scope === 'single_service') {
+        foreach ($services as $service) {
+            if ((int)$service['id'] === (int)($job['target_id'] ?? 0)) {
+                return 'Service: ' . $service['service_name'];
+            }
+        }
+        return 'Single service';
+    }
+
+    if ($scope === 'single_website') {
+        foreach ($websites as $website) {
+            if ((int)$website['id'] === (int)($job['target_id'] ?? 0)) {
+                return 'Website: ' . $website['website_name'];
+            }
+        }
+        return 'Single website';
+    }
+
+    return ucfirst(str_replace('_', ' ', $scope));
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -76,6 +111,7 @@ function schedule_phase(array $job): string
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/assets/css/status-v43.css?v=4.3.0">
     <link rel="stylesheet" href="/assets/css/admin-pro-v48.css?v=4.8.0">
+    <link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0">
 </head>
 <body class="admin-pro">
     <aside class="pro-sidebar">
@@ -94,10 +130,13 @@ function schedule_phase(array $job): string
             <div class="pro-nav-group">
                 <small>Manage</small>
                 <a class="active" href="/admin/schedules.php"><span>🗓</span>Schedules</a>
+                <a href="/admin/incidents.php"><span>⚠</span>Incidents</a>
+                <a href="/admin/analytics.php"><span>⌁</span>Analytics</a>
             </div>
             <div class="pro-nav-group">
                 <small>Admin</small>
                 <a href="/admin/settings.php"><span>⚙</span>Settings</a>
+                <a href="/admin/audit-log.php"><span>☷</span>Audit Log</a>
                 <a href="/admin/change-password.php"><span>🔒</span>Password</a>
                 <a href="/admin/logout.php"><span>⎋</span>Logout</a>
             </div>
@@ -179,24 +218,37 @@ function schedule_phase(array $job): string
                     </div>
 
                     <label>Scope</label>
-                    <select name="scope">
+                    <select name="scope" id="scheduleScope">
                         <option value="all">Everything: all services and websites</option>
                         <option value="services">All services only</option>
                         <option value="websites">All websites only</option>
+                        <option value="single_service">One specific service</option>
+                        <option value="single_website">One specific website</option>
                     </select>
+                    <small class="pro-field-hint">Upcoming maintenance is shown as an overlay only. Live status changes when the maintenance window actually begins.</small>
+
+                    <div class="pro-target-panel" id="serviceTargetPanel">
+                        <label>Target service</label>
+                        <select name="target_id" id="serviceTarget" disabled>
+                            <?php foreach ($services as $service): ?>
+                                <option value="<?= (int)$service['id'] ?>"><?= e($service['service_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div class="pro-target-panel" id="websiteTargetPanel">
+                        <label>Target website</label>
+                        <select name="target_id" id="websiteTarget" disabled>
+                            <?php foreach ($websites as $website): ?>
+                                <option value="<?= (int)$website['id'] ?>"><?= e($website['website_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <input type="hidden" name="target_type" id="targetType" value="">
+
+                    <input type="hidden" name="scheduled_status" value="planned_maintenance">
 
                     <div class="pro-form-row">
-                        <div>
-                            <label>Status before start</label>
-                            <select name="scheduled_status">
-                                <?php foreach (STATUS_OPTIONS as $key => $meta): ?>
-                                    <option value="<?= e($key) ?>" <?= $key === 'planned_maintenance' ? 'selected' : '' ?>>
-                                        Code <?= (int)$meta['code'] ?> - <?= e($meta['label']) ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-
                         <div>
                             <label>Status during event</label>
                             <select name="active_status">
@@ -207,16 +259,18 @@ function schedule_phase(array $job): string
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                    </div>
 
-                    <label>Status after end</label>
-                    <select name="after_status">
-                        <?php foreach (STATUS_OPTIONS as $key => $meta): ?>
-                            <option value="<?= e($key) ?>" <?= $key === 'operational' ? 'selected' : '' ?>>
-                                Code <?= (int)$meta['code'] ?> - <?= e($meta['label']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                        <div>
+                            <label>Status after event</label>
+                            <select name="after_status">
+                                <?php foreach (STATUS_OPTIONS as $key => $meta): ?>
+                                    <option value="<?= e($key) ?>" <?= $key === 'operational' ? 'selected' : '' ?>>
+                                        Code <?= (int)$meta['code'] ?> - <?= e($meta['label']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
 
                     <button class="button primary" type="submit">Create Schedule</button>
                 </form>
@@ -230,20 +284,22 @@ function schedule_phase(array $job): string
                     </div>
                 </div>
 
-                <div class="pro-mini-stack">
+                <div class="pro-flow">
                     <div>
                         <small>Before start</small>
-                        <strong>Planned maintenance</strong>
+                        <strong>Live status stays unchanged</strong>
                     </div>
                     <div>
                         <small>During event</small>
-                        <strong>Offline / selected active status</strong>
+                        <strong>Selected maintenance status is applied</strong>
                     </div>
                     <div>
                         <small>After event</small>
-                        <strong>Operational / selected after status</strong>
+                        <strong>Selected recovery status is applied</strong>
                     </div>
                 </div>
+
+                <p class="pro-help"><strong>Targeted maintenance is supported.</strong> You can schedule everything, all services, all websites, one service, or one website.</p>
             </article>
         </section>
 
@@ -264,13 +320,12 @@ function schedule_phase(array $job): string
                             <span><?= e(schedule_phase($job)) ?></span>
                             <h3><?= e($job['title']) ?></h3>
                             <p><?= e($job['details']) ?></p>
-                            <small>
-                                <?= e(format_dt($job['start_at'])) ?> → <?= e(format_dt($job['end_at'])) ?>
-                                · Scope: <?= e($job['scope']) ?>
-                                · Before: <?= e(status_meta($job['scheduled_status'])['label']) ?>
-                                · During: <?= e(status_meta($job['active_status'])['label']) ?>
-                                · After: <?= e(status_meta($job['after_status'])['label']) ?>
-                            </small>
+                            <small><?= e(format_dt($job['start_at'])) ?> → <?= e(format_dt($job['end_at'])) ?></small>
+                            <div class="pro-schedule-meta">
+                                <span class="pro-chip"><?= e(schedule_scope_label($job, $services, $websites)) ?></span>
+                                <span class="pro-chip">During: <?= e(status_meta($job['active_status'])['label']) ?></span>
+                                <span class="pro-chip">After: <?= e(status_meta($job['after_status'])['label']) ?></span>
+                            </div>
                         </div>
 
                         <div class="pro-actions">
@@ -294,5 +349,30 @@ function schedule_phase(array $job): string
             </div>
         </section>
     </main>
+    <script>
+    (function () {
+        const scope = document.getElementById('scheduleScope');
+        const servicePanel = document.getElementById('serviceTargetPanel');
+        const websitePanel = document.getElementById('websiteTargetPanel');
+        const serviceTarget = document.getElementById('serviceTarget');
+        const websiteTarget = document.getElementById('websiteTarget');
+        const targetType = document.getElementById('targetType');
+
+        function syncTargets() {
+            const value = scope ? scope.value : 'all';
+            const serviceMode = value === 'single_service';
+            const websiteMode = value === 'single_website';
+
+            servicePanel?.classList.toggle('show', serviceMode);
+            websitePanel?.classList.toggle('show', websiteMode);
+            if (serviceTarget) serviceTarget.disabled = !serviceMode;
+            if (websiteTarget) websiteTarget.disabled = !websiteMode;
+            if (targetType) targetType.value = serviceMode ? 'service' : (websiteMode ? 'website' : '');
+        }
+
+        scope?.addEventListener('change', syncTargets);
+        syncTargets();
+    })();
+    </script>
 </body>
 </html>
