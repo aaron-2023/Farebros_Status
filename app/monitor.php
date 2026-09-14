@@ -138,7 +138,7 @@ function check_http_health(array $website): array
         CURLOPT_TIMEOUT => MONITOR_HTTP_TIMEOUT_SECONDS,
         CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_HEADER => true,
-        CURLOPT_USERAGENT => 'FareBrosStatusMonitor/5.3',
+        CURLOPT_USERAGENT => 'FareBrosStatusMonitor/5.5',
         CURLOPT_NOBODY => false,
     ]);
     $raw = curl_exec($ch);

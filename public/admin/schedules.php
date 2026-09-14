@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/auth.php';
 require_once __DIR__ . '/../../app/scheduler.php';
 
+require_once __DIR__ . '/_layout.php';
+
 $user = require_login();
 
 $notice = null;
@@ -34,7 +36,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $actions = apply_scheduled_jobs();
             $notice = 'Scheduler checked. Actions: ' . (empty($actions) ? 'none' : implode(', ', $actions));
         }
-        if ($action !== '') {
+        if ($action === 'save_template') {
+            $templateId = save_maintenance_template($_POST, (int)$user['id']);
+            $notice = 'Maintenance template saved.';
+            audit_admin_action($user, 'save_maintenance_template', 'maintenance_template', $templateId);
+        }
+        if ($action === 'delete_template') {
+            $templateId = (int)($_POST['template_id'] ?? 0);
+            delete_maintenance_template($templateId);
+            $notice = 'Maintenance template deleted.';
+            audit_admin_action($user, 'delete_maintenance_template', 'maintenance_template', $templateId);
+        }
+        if ($action !== '' && !in_array($action, ['save_template','delete_template'], true)) {
             audit_admin_action($user, $action, 'schedule', isset($_POST['schedule_id']) ? (int)$_POST['schedule_id'] : null);
         }
     } catch (Throwable $ex) {
@@ -47,6 +60,7 @@ $activeJob = active_job_payload();
 $upcomingJob = upcoming_job_payload();
 $services = get_services();
 $websites = get_websites();
+$templates = get_maintenance_templates();
 
 function schedule_phase(array $job): string
 {
@@ -103,63 +117,16 @@ function schedule_scope_label(array $job, array $services, array $websites): str
     return ucfirst(str_replace('_', ' ', $scope));
 }
 ?>
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Scheduled Maintenance - <?= e(APP_NAME) ?></title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="/assets/css/status-v43.css?v=4.3.0">
-    <link rel="stylesheet" href="/assets/css/admin-pro-v48.css?v=4.8.0">
-    <link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0">
-</head>
-<body class="admin-pro">
-    <aside class="pro-sidebar">
-        <div class="pro-brand">
-            <div class="pro-brand-pill">Fare Brothers</div>
-            <h2>Status Admin</h2>
-            <p>Plan maintenance windows without hardcoded buttons.</p>
-        </div>
-
-        <nav class="pro-nav">
-            <div class="pro-nav-group">
-                <small>Main</small>
-                <a href="/admin/dashboard.php"><span>▣</span>Dashboard</a>
-                <a href="/" target="_blank"><span>↗</span>Public Page</a>
-            </div>
-            <div class="pro-nav-group">
-                <small>Manage</small>
-                <a class="active" href="/admin/schedules.php"><span>🗓</span>Schedules</a>
-                <a href="/admin/incidents.php"><span>⚠</span>Incidents</a>
-                <a href="/admin/analytics.php"><span>⌁</span>Analytics</a>
-            </div>
-            <div class="pro-nav-group">
-                <small>Admin</small>
-                <a href="/admin/settings.php"><span>⚙</span>Settings</a>
-                <a href="/admin/audit-log.php"><span>☷</span>Audit Log</a>
-                <a href="/admin/change-password.php"><span>🔒</span>Password</a>
-                <a href="/admin/logout.php"><span>⎋</span>Logout</a>
-            </div>
-        </nav>
-    </aside>
-
-    <main class="pro-main">
-        <header class="pro-topbar">
-            <div>
-                <div class="pro-kicker">Schedule Manager</div>
-                <h1>Scheduled Maintenance</h1>
-                <p>Create planned outages, upgrades, maintenance windows, or known service interruptions.</p>
-            </div>
-
-            <div class="pro-top-actions">
-                <a class="button ghost" href="/admin/dashboard.php">Back to Dashboard</a>
-                <form method="post">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="apply_schedules_now">
-                    <button class="button primary" type="submit">Check Now</button>
-                </form>
-            </div>
-        </header>
+<?php
+admin_page_start(
+    'maintenance',
+    'Maintenance',
+    'Plan maintenance windows and control how scheduled work changes the public status.',
+    'Status Management',
+    [['href' => '/admin/incidents.php', 'label' => 'Incidents', 'class' => 'ghost'],
+        ['href' => '/', 'label' => 'View Public Page', 'class' => 'primary', 'external' => true]]
+);
+?>
 
         <?php if ($notice): ?><div class="notice-box success"><?= e($notice) ?></div><?php endif; ?>
         <?php if ($error): ?><div class="notice-box danger"><?= e($error) ?></div><?php endif; ?>
@@ -199,6 +166,21 @@ function schedule_scope_label(array $job, array $services, array $websites): str
                 <form method="post" class="pro-form">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="add_schedule">
+
+                    <?php if ($templates): ?>
+                    <label>Start from template <span style="color:#607b97">(optional)</span></label>
+                    <select data-maint-template-select>
+                        <option value="">Blank maintenance window</option>
+                        <?php foreach ($templates as $template): $templateData = [
+                            'title' => $template['title'], 'details' => $template['details'], 'scope' => $template['scope'],
+                            'target_id' => $template['target_id'], 'active_status' => $template['active_status'], 'after_status' => $template['after_status'],
+                            'duration_minutes' => (int)$template['duration_minutes']
+                        ]; ?>
+                            <option value="<?= (int)$template['id'] ?>" data-template="<?= e(json_encode($templateData, JSON_UNESCAPED_SLASHES)) ?>"><?= e($template['template_name']) ?> · <?= (int)$template['duration_minutes'] ?> min</option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="pro-field-hint">Templates fill the title, details, scope, target, duration, and recovery behavior. Review the start/end time before saving.</small>
+                    <?php endif; ?>
 
                     <label>Title</label>
                     <input type="text" name="title" placeholder="Planned Electrical Infrastructure Upgrade" required>
@@ -304,6 +286,27 @@ function schedule_scope_label(array $job, array $services, array $websites): str
         </section>
 
         <section class="pro-card pro-card-full">
+            <div class="pro-card-head"><div><h2>Maintenance Templates</h2><p>Save repeatable maintenance plans so common work takes seconds to schedule.</p></div><span class="v54-count"><?= count($templates) ?> template<?= count($templates) === 1 ? '' : 's' ?></span></div>
+            <div class="v55-card-body v55-section-grid">
+                <form method="post" class="pro-form">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="save_template">
+                    <label>Template name</label><input type="text" name="template_name" placeholder="Monthly Server Updates" required>
+                    <label>Public maintenance title</label><input type="text" name="title" placeholder="Scheduled Infrastructure Maintenance" required>
+                    <label>Details</label><textarea name="details" rows="3" placeholder="Brief visitor-facing description"></textarea>
+                    <div class="pro-form-row"><div><label>Scope</label><select name="scope" id="templateScope"><option value="all">Everything</option><option value="services">All services</option><option value="websites">All websites</option><option value="single_service">One service</option><option value="single_website">One website</option></select></div><div><label>Default duration</label><div class="pro-input-suffix"><input type="number" name="duration_minutes" min="5" max="10080" value="60"><span>min</span></div></div></div>
+                    <div class="pro-target-panel" id="templateServicePanel"><label>Target service</label><select name="target_id" id="templateServiceTarget" disabled><?php foreach($services as $service): ?><option value="<?= (int)$service['id'] ?>"><?= e($service['service_name']) ?></option><?php endforeach; ?></select></div>
+                    <div class="pro-target-panel" id="templateWebsitePanel"><label>Target website</label><select name="target_id" id="templateWebsiteTarget" disabled><?php foreach($websites as $website): ?><option value="<?= (int)$website['id'] ?>"><?= e($website['website_name']) ?></option><?php endforeach; ?></select></div>
+                    <div class="pro-form-row"><div><label>Status during</label><select name="active_status"><?php foreach(STATUS_OPTIONS as $key=>$meta): ?><option value="<?= e($key) ?>" <?= $key==='maintenance'?'selected':'' ?>><?= e($meta['label']) ?></option><?php endforeach; ?></select></div><div><label>Status after</label><select name="after_status"><?php foreach(STATUS_OPTIONS as $key=>$meta): ?><option value="<?= e($key) ?>" <?= $key==='operational'?'selected':'' ?>><?= e($meta['label']) ?></option><?php endforeach; ?></select></div></div>
+                    <div class="pro-actions"><button class="button primary" type="submit">Save Template</button></div>
+                </form>
+                <div class="v55-template-list">
+                    <?php if(!$templates): ?><div class="v55-empty-state"><strong>No templates yet</strong><p>Create a template for maintenance work you repeat.</p></div><?php endif; ?>
+                    <?php foreach($templates as $template): ?><article class="v55-template-row"><div class="v55-row-between"><div><h3><?= e($template['template_name']) ?></h3><p><?= e($template['title']) ?> · <?= (int)$template['duration_minutes'] ?> min · <?= e(ucwords(str_replace('_',' ',$template['scope']))) ?></p></div><form method="post" data-confirm="Delete this maintenance template?"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete_template"><input type="hidden" name="template_id" value="<?= (int)$template['id'] ?>"><button class="button danger small" type="submit">Delete</button></form></div></article><?php endforeach; ?>
+                </div>
+            </div>
+        </section>
+
+        <section class="pro-card pro-card-full">
             <div class="pro-card-head">
                 <div>
                     <h2>Scheduled Jobs</h2>
@@ -348,7 +351,6 @@ function schedule_scope_label(array $job, array $services, array $websites): str
                 <?php endforeach; ?>
             </div>
         </section>
-    </main>
     <script>
     (function () {
         const scope = document.getElementById('scheduleScope');
@@ -372,7 +374,23 @@ function schedule_scope_label(array $job, array $services, array $websites): str
 
         scope?.addEventListener('change', syncTargets);
         syncTargets();
+
+        const templateScope = document.getElementById('templateScope');
+        const templateServicePanel = document.getElementById('templateServicePanel');
+        const templateWebsitePanel = document.getElementById('templateWebsitePanel');
+        const templateServiceTarget = document.getElementById('templateServiceTarget');
+        const templateWebsiteTarget = document.getElementById('templateWebsiteTarget');
+        function syncTemplateTargets() {
+            const value = templateScope ? templateScope.value : 'all';
+            const serviceMode = value === 'single_service';
+            const websiteMode = value === 'single_website';
+            templateServicePanel?.classList.toggle('show', serviceMode);
+            templateWebsitePanel?.classList.toggle('show', websiteMode);
+            if (templateServiceTarget) templateServiceTarget.disabled = !serviceMode;
+            if (templateWebsiteTarget) templateWebsiteTarget.disabled = !websiteMode;
+        }
+        templateScope?.addEventListener('change', syncTemplateTargets);
+        syncTemplateTargets();
     })();
     </script>
-</body>
-</html>
+<?php admin_page_end(); ?>

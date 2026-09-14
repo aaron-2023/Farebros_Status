@@ -1,10 +1,27 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/auth.php';
+require_once __DIR__ . '/_layout.php';
 $user = require_login();
 $rows = get_audit_log(300);
+
+admin_page_start(
+    'audit',
+    'Audit Log',
+    'Review administrative changes and automatic housekeeping activity.',
+    'Administration'
+);
 ?>
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Audit Log - <?= e(APP_NAME) ?></title><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/css/status-v43.css?v=4.3.0"><link rel="stylesheet" href="/assets/css/admin-pro-v48.css?v=4.8.0"><link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0"></head>
-<body class="admin-pro"><aside class="pro-sidebar"><div class="pro-brand"><div class="pro-brand-pill">Fare Brothers</div><h2>Status Admin</h2><p>Administrative activity and system housekeeping history.</p></div><nav class="pro-nav"><div class="pro-nav-group"><small>Main</small><a href="/admin/dashboard.php"><span>▣</span>Dashboard</a><a href="/" target="_blank"><span>↗</span>Public Page</a></div><div class="pro-nav-group"><small>Manage</small><a href="/admin/schedules.php"><span>🗓</span>Schedules</a><a href="/admin/incidents.php"><span>⚠</span>Incidents</a><a href="/admin/analytics.php"><span>⌁</span>Analytics</a></div><div class="pro-nav-group"><small>Admin</small><a href="/admin/settings.php"><span>⚙</span>Settings</a><a class="active" href="/admin/audit-log.php"><span>☷</span>Audit Log</a><a href="/admin/change-password.php"><span>🔒</span>Password</a><a href="/admin/logout.php"><span>⎋</span>Logout</a></div></nav></aside>
-<main class="pro-main"><header class="pro-topbar"><div><div class="pro-kicker">Administration</div><h1>Audit Log</h1><p>Who changed what, plus automatic housekeeping events.</p></div><div class="pro-top-actions"><a class="button ghost" href="/admin/dashboard.php">Dashboard</a></div></header>
-<section class="pro-card pro-card-full"><div class="pro-card-head"><div><h2>Recent Activity</h2><p>Latest <?= count($rows) ?> audit events. Passwords, SMTP secrets, webhook URLs, and form contents are never written here.</p></div></div><div class="audit-table"><div class="audit-row audit-head"><span>Time</span><span>User</span><span>Action</span><span>Target</span><span>Details</span><span>IP</span></div><?php if(!$rows):?><p class="empty">No audit events yet.</p><?php endif;?><?php foreach($rows as $row):?><div class="audit-row"><span><?=e(format_dt($row['created_at']))?></span><span><?=e($row['username'] ?: 'system')?></span><span><strong><?=e($row['action'])?></strong></span><span><?=e(trim(($row['target_type']??'').($row['target_id']?' #'.$row['target_id']:'')))?></span><span><?=e($row['details']??'')?></span><span><?=e($row['ip_address']??'')?></span></div><?php endforeach;?></div></section></main></body></html>
+<section class="pro-card pro-card-full">
+    <div class="pro-card-head"><div><h2>Recent Activity</h2><p>Latest <?= count($rows) ?> audit events. Passwords, SMTP secrets, webhook URLs, and form contents are never written here.</p></div><span class="v54-count"><?= count($rows) ?> events</span></div>
+    <div class="v54-card-body">
+        <div class="audit-table">
+            <div class="audit-row audit-head"><span>Time</span><span>User</span><span>Action</span><span>Target</span><span>Details</span><span>IP</span></div>
+            <?php if (!$rows): ?><p class="empty">No audit events yet.</p><?php endif; ?>
+            <?php foreach ($rows as $row): ?>
+                <div class="audit-row"><span><?= e(format_dt($row['created_at'])) ?></span><span><?= e($row['username'] ?: 'system') ?></span><span><strong><?= e($row['action']) ?></strong></span><span><?= e(trim(($row['target_type'] ?? '') . ($row['target_id'] ? ' #' . $row['target_id'] : ''))) ?></span><span><?= e($row['details'] ?? '') ?></span><span><?= e($row['ip_address'] ?? '') ?></span></div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</section>
+<?php admin_page_end(); ?>

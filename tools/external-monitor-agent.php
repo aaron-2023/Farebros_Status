@@ -1,6 +1,6 @@
 <?php
 /**
- * Fare Brothers Status v5.3 - Secondary Monitor Agent
+ * Fare Brothers Status v5.5 - Secondary Monitor Agent
  *
  * Copy this single file to a SECOND server/VPS that can run PHP + cURL.
  * Edit the four settings below, then run it every minute with cron:
