@@ -5,6 +5,8 @@ require_once __DIR__ . '/../../app/auth.php';
 require_once __DIR__ . '/../../app/monitor.php';
 require_once __DIR__ . '/../../app/maintenance.php';
 
+require_once __DIR__ . '/_layout.php';
+
 $user = require_login();
 $websites = get_websites();
 $sources = get_monitor_source_health();
@@ -27,16 +29,16 @@ function sparkline_points(array $series, int $width = 560, int $height = 120): s
     return implode(' ', $points);
 }
 ?>
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><title>Analytics - <?= e(APP_NAME) ?></title><meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/assets/css/status-v43.css?v=4.3.0"><link rel="stylesheet" href="/assets/css/admin-pro-v48.css?v=4.8.0"><link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0">
-</head>
-<body class="admin-pro">
-<aside class="pro-sidebar"><div class="pro-brand"><div class="pro-brand-pill">Fare Brothers</div><h2>Status Admin</h2><p>Uptime, response time, and monitoring health.</p></div><nav class="pro-nav"><div class="pro-nav-group"><small>Main</small><a href="/admin/dashboard.php"><span>▣</span>Dashboard</a><a href="/" target="_blank"><span>↗</span>Public Page</a></div><div class="pro-nav-group"><small>Manage</small><a href="/admin/schedules.php"><span>🗓</span>Schedules</a><a href="/admin/incidents.php"><span>⚠</span>Incidents</a><a class="active" href="/admin/analytics.php"><span>⌁</span>Analytics</a></div><div class="pro-nav-group"><small>Admin</small><a href="/admin/settings.php"><span>⚙</span>Settings</a><a href="/admin/audit-log.php"><span>☷</span>Audit Log</a><a href="/admin/change-password.php"><span>🔒</span>Password</a><a href="/admin/logout.php"><span>⎋</span>Logout</a></div></nav></aside>
-<main class="pro-main">
-<header class="pro-topbar"><div><div class="pro-kicker">Monitoring Analytics</div><h1>Uptime & Performance</h1><p>Daily rollups preserve long-term history while raw checks are automatically pruned.</p></div><div class="pro-top-actions"><a class="button ghost" href="/admin/settings.php">Retention Settings</a><a class="button primary" href="/" target="_blank">Public Page</a></div></header>
+<?php
+admin_page_start(
+    'analytics',
+    'Uptime & Performance',
+    'Review uptime history, response times, monitor sources, and database health.',
+    'Monitoring',
+    [['href' => '/admin/monitoring.php', 'label' => 'Monitor Center', 'class' => 'ghost'],
+        ['href' => '/admin/settings.php', 'label' => 'Retention Settings', 'class' => 'ghost']]
+);
+?>
 <section class="pro-status-strip pro-status-strip-four"><article><span class="pro-icon">◴</span><small>Raw Checks</small><strong><?= number_format($dbHealth['monitor_logs']) ?></strong><em>retained detail</em></article><article><span class="pro-icon">▥</span><small>Daily Rollups</small><strong><?= number_format($dbHealth['daily_rollups']) ?></strong><em>long-term history</em></article><article><span class="pro-icon">◎</span><small>Monitor Sources</small><strong><?= count($sources) ?></strong><em><?= count(array_filter($sources, static fn($s)=>empty($s['is_stale']))) ?> active</em></article><article><span class="pro-icon">◫</span><small>Database</small><strong><?= e(number_format($dbHealth['database_bytes']/1048576, 1)) ?> MB</strong><em><?= number_format($dbHealth['backup_count']) ?> backup(s)</em></article></section>
 
 <section class="analytics-grid">
@@ -61,4 +63,4 @@ function sparkline_points(array $series, int $width = 560, int $height = 120): s
 <article class="pro-card"><div class="pro-card-head"><div><h2>Monitor Sources</h2><p>Redundant checker heartbeat and latest result.</p></div></div><div class="pro-mini-stack"><?php if(!$sources):?><div><small>Sources</small><strong>No checks recorded</strong></div><?php endif;?><?php foreach($sources as $source):?><div><small><?=e($source['display_name'])?></small><strong><?=!empty($source['is_stale'])?'Stale':'Active'?> · <?=e(strtoupper((string)$source['last_result']))?></strong><em><?=e(format_dt($source['last_seen_at']))?></em></div><?php endforeach;?></div></article>
 <article class="pro-card"><div class="pro-card-head"><div><h2>Database Maintenance</h2><p>Automatic housekeeping is tied to the minute monitor cron.</p></div></div><div class="pro-mini-stack"><div><small>Last housekeeping</small><strong><?= $dbHealth['last_housekeeping_at'] ? e(format_dt($dbHealth['last_housekeeping_at'])) : 'Not yet' ?></strong></div><div><small>Last VACUUM</small><strong><?= $dbHealth['last_vacuum_at'] ? e(format_dt($dbHealth['last_vacuum_at'])) : 'Not yet' ?></strong></div><div><small>Latest backup</small><strong><?= e($dbHealth['latest_backup'] ?? 'None yet') ?></strong></div></div><div class="pro-actions"><a class="button ghost" href="/admin/settings.php">Housekeeping Settings</a></div></article>
 </section>
-</main></body></html>
+<?php admin_page_end(); ?>

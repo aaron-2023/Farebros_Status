@@ -5,6 +5,8 @@ require_once __DIR__ . '/../../app/auth.php';
 require_once __DIR__ . '/../../app/notifications.php';
 require_once __DIR__ . '/../../app/maintenance.php';
 
+require_once __DIR__ . '/_layout.php';
+
 $user = require_login();
 $notice = null;
 $error = null;
@@ -59,6 +61,13 @@ function save_settings_from_post(): void
         'external_monitor_enabled' => !empty($_POST['external_monitor_enabled']) ? '1' : '0',
         'external_monitor_stale_minutes' => (string)max(1, min(120, (int)($_POST['external_monitor_stale_minutes'] ?? 5))),
         'public_history_days' => (string)max(30, min(90, (int)($_POST['public_history_days'] ?? 90))),
+        'public_subscriptions_enabled' => !empty($_POST['public_subscriptions_enabled']) ? '1' : '0',
+        'outbound_webhook_enabled' => !empty($_POST['outbound_webhook_enabled']) ? '1' : '0',
+        'outbound_webhook_url' => trim((string)($_POST['outbound_webhook_url'] ?? '')),
+        'public_api_enabled' => !empty($_POST['public_api_enabled']) ? '1' : '0',
+        'public_api_allow_history' => !empty($_POST['public_api_allow_history']) ? '1' : '0',
+        'uptime_sla_target' => number_format(max(0.0, min(100.0, (float)($_POST['uptime_sla_target'] ?? 99.9))), 3, '.', ''),
+        'dashboard_customization_enabled' => !empty($_POST['dashboard_customization_enabled']) ? '1' : '0',
     ];
 
     foreach ($simple as $key => $value) {
@@ -69,13 +78,17 @@ function save_settings_from_post(): void
     if ($password !== '') {
         set_setting('smtp_password', $password);
     }
+    $webhookSecret = trim((string)($_POST['outbound_webhook_secret'] ?? ''));
+    if ($webhookSecret !== '') {
+        set_setting('outbound_webhook_secret', $webhookSecret);
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string)($_POST['action'] ?? 'save_settings');
     try {
-        if (in_array($action, ['save_settings', 'test_smtp', 'test_discord', 'generate_external_key'], true)) {
+        if (in_array($action, ['save_settings', 'test_smtp', 'test_discord', 'test_webhook', 'generate_external_key', 'generate_webhook_secret'], true)) {
             save_settings_from_post();
         }
 
@@ -89,11 +102,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $result = smtp_send($firstTo, 'Fare Brothers Status SMTP Test', "SMTP is configured correctly.\n\nThis is a test from " . APP_URL);
             notification_log_write('email', 'test', 'SMTP Test', $firstTo, true, $result['message']);
+            set_setting('last_smtp_test_at', gmdate('Y-m-d H:i:s'));
+            set_setting('last_smtp_test_ok', '1');
             $notice = 'Test email sent to ' . $firstTo . '.';
         } elseif ($action === 'test_discord') {
             $result = discord_send('Fare Brothers Status Test', 'Discord alerts are configured correctly. This is a test notification.', 'operational');
             notification_log_write('discord', 'test', 'Discord Test', 'Discord webhook', true, $result['message']);
+            set_setting('last_discord_test_at', gmdate('Y-m-d H:i:s'));
+            set_setting('last_discord_test_ok', '1');
             $notice = 'Test Discord notification sent.';
+        } elseif ($action === 'test_webhook') {
+            $result = outbound_webhook_send('Fare Brothers Status Webhook Test', 'Outbound webhook delivery is configured correctly.', 'operational', 'test', ['source' => 'settings']);
+            $notice = 'Test outbound webhook delivered successfully (HTTP ' . (int)($result['http_code'] ?? 0) . ').';
+        } elseif ($action === 'generate_webhook_secret') {
+            set_setting('outbound_webhook_secret', bin2hex(random_bytes(32)));
+            $notice = 'New webhook signing secret generated.';
         } elseif ($action === 'generate_external_key') {
             set_setting('external_monitor_key', bin2hex(random_bytes(24)));
             $notice = 'New external monitor key generated. Update any secondary monitor agents with the new key.';
@@ -108,8 +131,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'test_smtp') {
                 $to = trim((string)get_setting('alert_email_to', ''));
                 notification_log_write('email', 'test', 'SMTP Test', $to !== '' ? $to : 'not configured', false, $ex->getMessage());
+                set_setting('last_smtp_test_at', gmdate('Y-m-d H:i:s'));
+                set_setting('last_smtp_test_ok', '0');
             } elseif ($action === 'test_discord') {
                 notification_log_write('discord', 'test', 'Discord Test', 'Discord webhook', false, $ex->getMessage());
+                set_setting('last_discord_test_at', gmdate('Y-m-d H:i:s'));
+                set_setting('last_discord_test_ok', '0');
             }
         } catch (Throwable $ignored) {
             // Do not hide the original delivery error if logging itself fails.
@@ -128,27 +155,15 @@ $websites = get_websites();
 $externalKey = $g('external_monitor_key');
 $notificationLog = get_recent_notification_log(8);
 ?>
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Settings - <?= e(APP_NAME) ?></title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="/assets/css/status-v43.css?v=4.3.0">
-    <link rel="stylesheet" href="/assets/css/admin-pro-v48.css?v=4.8.0">
-    <link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0">
-</head>
-<body class="admin-pro">
-<aside class="pro-sidebar">
-    <div class="pro-brand"><div class="pro-brand-pill">Fare Brothers</div><h2>Status Admin</h2><p>Monitoring, alerts, retention, and site preferences.</p></div>
-    <nav class="pro-nav">
-        <div class="pro-nav-group"><small>Main</small><a href="/admin/dashboard.php"><span>▣</span>Dashboard</a><a href="/" target="_blank"><span>↗</span>Public Page</a></div>
-        <div class="pro-nav-group"><small>Manage</small><a href="/admin/schedules.php"><span>🗓</span>Schedules</a><a href="/admin/incidents.php"><span>⚠</span>Incidents</a><a href="/admin/analytics.php"><span>⌁</span>Analytics</a></div>
-        <div class="pro-nav-group"><small>Admin</small><a class="active" href="/admin/settings.php"><span>⚙</span>Settings</a><a href="/admin/audit-log.php"><span>☷</span>Audit Log</a><a href="/admin/change-password.php"><span>🔒</span>Password</a><a href="/admin/logout.php"><span>⎋</span>Logout</a></div>
-    </nav>
-</aside>
-<main class="pro-main">
-    <header class="pro-topbar"><div><div class="pro-kicker">Status Platform v5.3</div><h1>Settings</h1><p>Configure monitoring behavior, notifications, redundancy, and automatic database housekeeping.</p></div><div class="pro-top-actions"><a class="button ghost" href="/admin/dashboard.php">Dashboard</a><a class="button primary" href="/" target="_blank">Public Page</a></div></header>
+<?php
+admin_page_start(
+    'settings',
+    'Settings',
+    'Configure monitoring behavior, alerts, redundancy, retention, and public status preferences.',
+    'Administration',
+    [['href' => '/', 'label' => 'View Public Page', 'class' => 'primary', 'external' => true]]
+);
+?>
     <?php if ($notice): ?><div class="notice-box success"><?= e($notice) ?></div><?php endif; ?>
     <?php if ($error): ?><div class="notice-box danger"><?= e($error) ?></div><?php endif; ?>
 
@@ -213,6 +228,35 @@ $notificationLog = get_recent_notification_log(8);
 
         <section class="pro-grid">
             <article class="pro-card">
+                <div class="pro-card-head"><div><h2>Public Subscriptions & Reporting</h2><p>Visitor alerts and the SLA target used in monthly reports.</p></div></div>
+                <div class="pro-form">
+                    <label class="pro-check"><input type="checkbox" name="public_subscriptions_enabled" value="1" <?= $g('public_subscriptions_enabled','1') === '1' ? 'checked' : '' ?>>Allow public email subscriptions</label>
+                    <small class="pro-field-hint">Requires SMTP. Subscribers confirm their address before alerts begin and receive an unsubscribe link in every email.</small>
+                    <label>Monthly uptime / SLA target</label><div class="pro-input-suffix"><input type="number" name="uptime_sla_target" min="0" max="100" step="0.001" value="<?= e($g('uptime_sla_target','99.900')) ?>"><span>%</span></div>
+                    <label class="pro-check"><input type="checkbox" name="dashboard_customization_enabled" value="1" <?= $g('dashboard_customization_enabled','1') === '1' ? 'checked' : '' ?>>Allow admins to customize dashboard widgets</label>
+                    <div class="pro-actions"><a class="button ghost" href="/admin/subscribers.php">Manage Subscribers</a><a class="button ghost" href="/admin/reports.php">Monthly Reports</a></div>
+                </div>
+            </article>
+
+            <article class="pro-card">
+                <div class="pro-card-head"><div><h2>Public API & Outbound Webhooks</h2><p>Integrate live FareBros status into other sites and automation.</p></div><span class="pro-chip">v5.5</span></div>
+                <div class="pro-form">
+                    <label class="pro-check"><input type="checkbox" name="public_api_enabled" value="1" <?= $g('public_api_enabled','1') === '1' ? 'checked' : '' ?>>Enable public read-only API</label>
+                    <label class="pro-check"><input type="checkbox" name="public_api_allow_history" value="1" <?= $g('public_api_allow_history','1') === '1' ? 'checked' : '' ?>>Allow public history / incident endpoints</label>
+                    <div class="v55-api-box"><code><?= e(rtrim(APP_URL,'/')) ?>/api/v1/status.php</code><p>Current status, groups, services, websites, incidents and effective dependency state.</p></div>
+                    <div class="v55-api-box"><code><?= e(rtrim(APP_URL,'/')) ?>/api/v1/incidents.php?limit=25</code><p>Recent incident history. Controlled by the history API toggle above.</p></div>
+                    <div class="v55-api-box"><code><?= e(rtrim(APP_URL,'/')) ?>/api/v1/history.php?website_id=1&amp;days=90</code><p>Per-website uptime history. Replace website_id with the Monitor ID shown on the Websites page.</p></div>
+                    <label class="pro-check"><input type="checkbox" name="outbound_webhook_enabled" value="1" <?= $g('outbound_webhook_enabled') === '1' ? 'checked' : '' ?>>Send signed JSON webhooks for status events</label>
+                    <label>Webhook destination URL</label><input type="url" name="outbound_webhook_url" value="<?= e($g('outbound_webhook_url')) ?>" placeholder="https://example.com/hooks/farebros-status">
+                    <label>Signing secret</label><div class="pro-secret-row"><input type="password" name="outbound_webhook_secret" autocomplete="new-password" placeholder="Leave blank to keep saved secret"><button class="button ghost small" type="submit" name="action" value="generate_webhook_secret">Generate</button></div>
+                    <small class="pro-field-hint">Requests include <code>X-FareBros-Signature: sha256=…</code>, an HMAC-SHA256 signature of the raw JSON body.</small>
+                    <div class="pro-actions"><button class="button ghost" type="submit" name="action" value="test_webhook">Save + Test Webhook</button></div>
+                </div>
+            </article>
+        </section>
+
+        <section class="pro-grid">
+            <article class="pro-card">
                 <div class="pro-card-head"><div><h2>Log Retention & Backups</h2><p>Stops raw monitor checks from growing forever while keeping daily uptime history.</p></div></div>
                 <div class="pro-form">
                     <label>Keep raw monitor logs</label><div class="pro-input-suffix"><input type="number" name="monitor_log_retention_days" min="1" max="365" value="<?= (int)$g('monitor_log_retention_days','30') ?>"><span>days</span></div>
@@ -243,6 +287,4 @@ $notificationLog = get_recent_notification_log(8);
             <div class="pro-actions"><button class="button primary" type="submit" name="action" value="save_settings">Save All Settings</button><a class="button ghost" href="/admin/dashboard.php">Cancel</a></div>
         </section>
     </form>
-</main>
-</body>
-</html>
+<?php admin_page_end(); ?>

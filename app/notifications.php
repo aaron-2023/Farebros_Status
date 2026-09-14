@@ -179,7 +179,7 @@ function discord_send(string $subject, string $message, string $severity = 'info
         CURLOPT_TIMEOUT => 12,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
         CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-        CURLOPT_USERAGENT => 'FareBrosStatus/5.3',
+        CURLOPT_USERAGENT => 'FareBrosStatus/5.5',
     ]);
     $body = curl_exec($ch);
     $error = curl_error($ch);
@@ -200,7 +200,7 @@ function notification_log_write(string $channel, string $eventType, string $subj
         ->execute([$channel, $eventType, $subject, $destination, $success ? 1 : 0, substr($response, 0, 2000)]);
 }
 
-function send_status_notifications(string $subject, string $message, string $severity = 'info', string $eventType = 'status_change'): array
+function send_status_notifications(string $subject, string $message, string $severity = 'info', string $eventType = 'status_change', array $context = []): array
 {
     ensure_notification_schema();
     $results = [];
@@ -229,6 +229,19 @@ function send_status_notifications(string $subject, string $message, string $sev
             notification_log_write('discord', $eventType, $subject, $destination, false, $ex->getMessage());
             $results[] = ['channel' => 'discord', 'destination' => $destination, 'ok' => false, 'error' => $ex->getMessage()];
         }
+    }
+
+    // v5.5 optional public subscriber delivery and general outbound webhook.
+    // These functions live in app/platform.php; function_exists keeps v5.3/v5.4
+    // compatibility for code paths that load notifications independently.
+    if (function_exists('dispatch_subscriber_notifications')) {
+        foreach (dispatch_subscriber_notifications($subject, $message, $eventType, $context) as $subscriberResult) {
+            $results[] = ['channel' => 'subscriber_email'] + $subscriberResult;
+        }
+    }
+    if (function_exists('dispatch_outbound_webhook')) {
+        $webhookResult = dispatch_outbound_webhook($subject, $message, $severity, $eventType, $context);
+        if ($webhookResult) $results[] = ['channel' => 'outbound_webhook'] + $webhookResult;
     }
 
     return $results;

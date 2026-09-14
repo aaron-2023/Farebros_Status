@@ -99,6 +99,11 @@ function run_status_housekeeping(bool $force = false): array
     } catch (Throwable $ignored) {
     }
 
+    $platformTasks = [];
+    if (function_exists('platform_run_daily_tasks')) {
+        try { $platformTasks = platform_run_daily_tasks(); } catch (Throwable $ignored) {}
+    }
+
     set_setting('last_housekeeping_at', gmdate('Y-m-d H:i:s'));
     audit_admin_action(null, 'system_housekeeping', 'database', null, 'Backfilled ' . $backfilled . ' rollups; purged ' . $deletedLogs . ' monitor logs; pruned ' . $deletedBackups . ' backups; vacuum=' . ($vacuumed ? 'yes' : 'no') . ($backupError ? '; backup error=' . $backupError : ''));
 
@@ -110,6 +115,7 @@ function run_status_housekeeping(bool $force = false): array
         'backup_error' => $backupError,
         'old_backups_deleted' => $deletedBackups,
         'vacuumed' => $vacuumed,
+        'platform_tasks' => $platformTasks,
     ];
 }
 

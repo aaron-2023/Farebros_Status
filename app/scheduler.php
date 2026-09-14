@@ -188,7 +188,10 @@ function write_scheduled_update(array $job, string $newStatus, string $phase): v
     ')->execute([$newStatus, $title, $message]);
 
     $severity = $phase === 'completed' ? 'resolved' : 'warning';
-    send_status_notifications($title, $message, $severity, 'scheduled_maintenance_' . $phase);
+    $notifyContext = ['schedule_id' => (int)$job['id'], 'scope' => (string)($job['scope'] ?? 'all')];
+    if (($job['scope'] ?? '') === 'single_service') { $notifyContext['target_type'] = 'service'; $notifyContext['target_id'] = (int)($job['target_id'] ?? 0); }
+    if (($job['scope'] ?? '') === 'single_website') { $notifyContext['target_type'] = 'website'; $notifyContext['target_id'] = (int)($job['target_id'] ?? 0); }
+    send_status_notifications($title, $message, $severity, 'scheduled_maintenance_' . $phase, $notifyContext);
 }
 
 function active_job_payload(): ?array

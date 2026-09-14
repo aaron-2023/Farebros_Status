@@ -107,7 +107,16 @@ function create_incident(string $title, string $summary, string $impact, array $
         throw $ex;
     }
 
-    send_status_notifications('Incident: ' . $title, $message, $impact === 'critical' ? 'critical' : 'warning', 'incident_created');
+    
+    $notifyTargets = [];
+    foreach ($targets as $target) {
+        $type = (string)($target['type'] ?? '');
+        $targetId = (int)($target['id'] ?? 0);
+        if (in_array($type, ['service','website'], true) && $targetId > 0) $notifyTargets[] = ['type'=>$type,'id'=>$targetId];
+    }
+    $notifyContext = ['incident_id' => $id, 'targets' => $notifyTargets];
+    if (!empty($notifyTargets[0])) { $notifyContext['target_type'] = $notifyTargets[0]['type']; $notifyContext['target_id'] = $notifyTargets[0]['id']; }
+    send_status_notifications('Incident: ' . $title, $message, $impact === 'critical' ? 'critical' : 'warning', 'incident_created', $notifyContext);
     return $id;
 }
 
@@ -138,7 +147,11 @@ function add_incident_update(int $incidentId, string $status, string $message, ?
     }
 
     $severity = $status === 'resolved' ? 'resolved' : (($incident['impact'] ?? 'minor') === 'critical' ? 'critical' : 'warning');
-    send_status_notifications('Incident update: ' . $incident['title'], incident_status_label($status) . "\n\n" . $message, $severity, 'incident_update');
+    $targets = get_incident_targets($incidentId);
+    $notifyTargets = array_map(static fn(array $t): array => ['type'=>(string)$t['target_type'],'id'=>(int)$t['target_id']], $targets);
+    $notifyContext = ['incident_id' => $incidentId, 'targets' => $notifyTargets];
+    if (!empty($notifyTargets[0])) { $notifyContext['target_type'] = $notifyTargets[0]['type']; $notifyContext['target_id'] = $notifyTargets[0]['id']; }
+    send_status_notifications('Incident update: ' . $incident['title'], incident_status_label($status) . "\n\n" . $message, $severity, 'incident_update', $notifyContext);
 }
 
 function delete_incident(int $incidentId): void
@@ -191,6 +204,14 @@ function get_recent_incidents(int $limit = 20): array
     $stmt = db()->prepare('SELECT * FROM incidents ORDER BY started_at DESC, id DESC LIMIT ?');
     $stmt->bindValue(1, max(1, min(100, $limit)), PDO::PARAM_INT);
     $stmt->execute();
+    return array_map('hydrate_incident', $stmt->fetchAll());
+}
+
+function get_incidents_between(string $startAt, string $endAt): array
+{
+    ensure_incident_schema();
+    $stmt = db()->prepare('SELECT * FROM incidents WHERE started_at >= ? AND started_at < ? ORDER BY started_at DESC, id DESC');
+    $stmt->execute([$startAt, $endAt]);
     return array_map('hydrate_incident', $stmt->fetchAll());
 }
 
