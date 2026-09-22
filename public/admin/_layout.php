@@ -15,6 +15,7 @@ function admin_nav_icon(string $name): string
         'incidents' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 4 9 16H3L12 4Z"/><path d="M12 9v5M12 17h.01"/></svg>',
         'maintenance' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0-5-5L12 4 9 7 6.5 4.5a4 4 0 0 0 5 5L19 17l2-2-6.5-8.5Z"/><path d="m5 19 4-4"/></svg>',
         'monitoring' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"/><path d="M4 20h16"/></svg>',
+        'cloudflare' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10a4 4 0 0 0 .7-7.9A6 6 0 0 0 6.2 8.5 4.8 4.8 0 0 0 7 18Z"/><path d="M9.5 14.5 12 12l2.5 2.5M12 12v5"/></svg>',
         'analytics' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M10 19V5M15 19v-7M20 19V3"/></svg>',
         'reports' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M15 3v5h5M9 12h7M9 16h7"/></svg>',
         'health' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-8-4.8-8-10a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.2-8 10-8 10Z"/><path d="M7.5 12h2l1-2 2 4 1-2h3"/></svg>',
@@ -82,6 +83,7 @@ function admin_page_start(string $active, string $title, string $subtitle, strin
         <div class="v554-nav-group">
             <div class="v554-nav-heading">Monitoring & Reporting</div>
             <?php admin_nav_item('monitoring', $active, '/admin/monitoring.php', 'monitoring', 'Monitor & Activity'); ?>
+            <?php admin_nav_item('cloudflare', $active, '/admin/cloudflare.php', 'cloudflare', 'Cloudflare Failover'); ?>
             <?php admin_nav_item('analytics', $active, '/admin/analytics.php', 'analytics', 'Analytics'); ?>
             <?php admin_nav_item('reports', $active, '/admin/reports.php', 'reports', 'Monthly Reports'); ?>
             <?php admin_nav_item('health', $active, '/admin/system-health.php', 'health', 'System Health'); ?>
@@ -160,6 +162,7 @@ function admin_command_palette(): void
         ['Schedule Maintenance','Plan a maintenance window','/admin/schedules.php','Status'],
         ['Groups & Dependencies','Organize services and upstream relationships','/admin/operations.php','Operations'],
         ['Monitor & Activity','Run checks and inspect logs','/admin/monitoring.php','Monitoring'],
+        ['Cloudflare Failover','Automatic outage redirect, API token, and manual failover controls','/admin/cloudflare.php','Monitoring'],
         ['Analytics','Response time and uptime analytics','/admin/analytics.php','Monitoring'],
         ['Monthly Reports','Generate monthly uptime reports','/admin/reports.php','Reports'],
         ['System Health','Check cron, backups, database and integrations','/admin/system-health.php','System'],

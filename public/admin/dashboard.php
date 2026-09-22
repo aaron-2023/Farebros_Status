@@ -47,6 +47,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ? 'Portal sync sent.'
                     : 'Status saved, but the portal sync failed or was skipped.';
             }
+        } elseif ($action === 'cloudflare_redirect_on') {
+            if (!cloudflare_failover_credentials_configured()) {
+                throw new RuntimeException('Cloudflare failover is not configured. Open Cloudflare Failover first.');
+            }
+            cloudflare_failover_set_remote(true, false, 'manual_dashboard_enable');
+            cloudflare_failover_log('manual_enable', 'An administrator manually enabled the Fare Brothers redirect from the main dashboard.', ['user_id' => (int)$user['id']]);
+            $notice = 'Cloudflare emergency redirect enabled.';
+        } elseif ($action === 'cloudflare_redirect_off') {
+            if (!cloudflare_failover_credentials_configured()) {
+                throw new RuntimeException('Cloudflare failover is not configured. Open Cloudflare Failover first.');
+            }
+            cloudflare_failover_set_remote(false, false, 'manual_dashboard_disable');
+            cloudflare_failover_log('manual_disable', 'An administrator manually disabled the Fare Brothers redirect from the main dashboard.', ['user_id' => (int)$user['id']]);
+            $notice = 'Cloudflare emergency redirect disabled.';
         }
         if ($action !== '') audit_admin_action($user, $action, 'dashboard');
     } catch (Throwable $ex) {
@@ -70,6 +84,10 @@ $lastMonitor = $monitorLogs[0] ?? null;
 $systemHealth = status_system_health();
 $dashboardLayout = get_dashboard_layout((int)$user['id']);
 $dashboardCustomizable = get_setting('dashboard_customization_enabled', '1') === '1';
+$cloudflareStatus = cloudflare_failover_status(false);
+$cloudflareState = (array)($cloudflareStatus['state'] ?? []);
+$cloudflareRemoteState = (string)($cloudflareState['remote_state'] ?? 'unknown');
+$cloudflareRemoteEnabled = $cloudflareRemoteState === 'enabled';
 
 $operationalWebsites = count(array_filter($websites, static fn(array $site): bool => ($site['current_status'] ?? '') === 'operational'));
 $problemWebsites = count($websites) - $operationalWebsites;
@@ -88,7 +106,7 @@ $severityClass = static fn(string $class): string => match ($class) {
 };
 $widgetLabels = [
     'status'=>'Public Status','services'=>'Service Status','quick_actions'=>'Quick Actions','system_health'=>'System Health',
-    'maintenance'=>'Maintenance','incidents'=>'Active Incidents','announcements'=>'Announcements','monitoring'=>'Monitoring','primary'=>'Primary Website',
+    'maintenance'=>'Maintenance','incidents'=>'Active Incidents','announcements'=>'Announcements','monitoring'=>'Monitoring','primary'=>'Primary Website','cloudflare'=>'Cloudflare Failover',
 ];
 $hiddenWidgets = array_flip($dashboardLayout['hidden']);
 
@@ -150,6 +168,23 @@ admin_notice($error, 'danger');
 <article class="pro-card v55-dashboard-widget <?= $isHidden ? 'v55-widget-hidden':'' ?>" data-dashboard-widget="quick_actions"><div class="pro-card-head"><div><h2>Quick Actions</h2><p>Common tasks, one click away.</p></div></div><div class="v54-card-body v54-quick-actions v55-quick-actions"><a href="/admin/websites.php#add"><span class="v54-quick-icon">＋</span>Add Website</a><a href="/admin/announcements.php#add"><span class="v54-quick-icon">✦</span>Announcement</a><a href="/admin/incidents.php"><span class="v54-quick-icon">!</span>Incident</a><a href="/admin/schedules.php"><span class="v54-quick-icon">◷</span>Maintenance</a><a href="/admin/operations.php"><span class="v54-quick-icon">◇</span>Dependencies</a><a href="/admin/reports.php"><span class="v54-quick-icon">▤</span>Reports</a></div></article>
 <?php elseif ($widget === 'system_health'): ?>
 <article class="pro-card v55-dashboard-widget <?= $isHidden ? 'v55-widget-hidden':'' ?>" data-dashboard-widget="system_health"><div class="pro-card-head"><div><h2>System Health</h2><p>The status platform monitoring itself.</p></div><a class="v54-card-link" href="/admin/system-health.php">Full Health</a></div><div class="v54-card-body"><div class="v55-dashboard-health <?= e($systemHealth['overall']) ?>"><span><?= $systemHealth['overall']==='good'?'✓':($systemHealth['overall']==='warning'?'!':'×') ?></span><div><strong><?= $systemHealth['overall']==='good'?'Platform healthy':($systemHealth['overall']==='warning'?'Needs attention':'Platform problem') ?></strong><small><?= (int)$systemHealth['bad_count'] ?> critical · <?= (int)$systemHealth['warning_count'] ?> warnings</small></div></div><div class="v55-mini-checks"><?php foreach(array_slice($systemHealth['checks'],0,4) as $check): ?><div><span class="v55-mini-dot <?= e($check['status']) ?>"></span><strong><?= e($check['label']) ?></strong><small><?= e($check['value']) ?></small></div><?php endforeach; ?></div></div></article>
+<?php elseif ($widget === 'cloudflare'): ?>
+<article class="pro-card v55-dashboard-widget <?= $isHidden ? 'v55-widget-hidden':'' ?>" data-dashboard-widget="cloudflare">
+    <div class="pro-card-head"><div><h2>Cloudflare Failover</h2><p>Automatic and manual emergency routing for Fare Bros.</p></div><a class="v54-card-link" href="/admin/cloudflare.php">Manage</a></div>
+    <div class="v54-card-body">
+        <div class="v54-health-grid">
+            <div class="v54-health-item"><small>Redirect</small><strong><?= $cloudflareRemoteState === 'unknown' ? 'Unknown' : ($cloudflareRemoteEnabled ? 'ON' : 'OFF') ?></strong><span><?= $cloudflareRemoteEnabled ? 'Visitors sent to status site' : 'Normal routing' ?></span></div>
+            <div class="v54-health-item"><small>Automatic Failover</small><strong><?= !empty($cloudflareStatus['enabled']) ? 'Enabled' : 'Disabled' ?></strong><span><?= (int)$cloudflareStatus['failure_threshold'] ?> failures / <?= (int)$cloudflareStatus['recovery_threshold'] ?> recoveries</span></div>
+            <div class="v54-health-item"><small>API</small><strong><?= !empty($cloudflareStatus['configured']) ? 'Ready' : 'Needs Setup' ?></strong><span><?= e((string)$cloudflareStatus['token_summary']) ?></span></div>
+        </div>
+        <form method="post" class="pro-actions">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <button class="button danger" type="submit" name="action" value="cloudflare_redirect_on" <?= empty($cloudflareStatus['configured']) ? 'disabled' : '' ?> onclick="return confirm('Turn ON the emergency redirect to the status site?')">Redirect ON</button>
+            <button class="button ghost" type="submit" name="action" value="cloudflare_redirect_off" <?= empty($cloudflareStatus['configured']) ? 'disabled' : '' ?>>Redirect OFF</button>
+            <a class="button ghost" href="/admin/cloudflare.php">Settings</a>
+        </form>
+    </div>
+</article>
 <?php elseif ($widget === 'maintenance'): ?>
 <article class="pro-card v55-dashboard-widget <?= $isHidden ? 'v55-widget-hidden':'' ?>" data-dashboard-widget="maintenance"><div class="pro-card-head"><div><h2>Maintenance</h2><p>Current and next planned window.</p></div><a class="v54-card-link" href="/admin/schedules.php">Manage</a></div><div class="v54-card-body v54-compact-list"><?php if($activeJob): ?><div class="v54-compact-row"><div class="v54-row-main"><div><strong><?= e((string)$activeJob['title']) ?></strong><small>Ends <?= e(format_dt($activeJob['end_at']??null)) ?></small></div><span class="v54-status-pill warn">In Progress</span></div></div><?php elseif($upcomingJob): ?><div class="v54-compact-row"><div class="v54-row-main"><div><strong><?= e((string)$upcomingJob['title']) ?></strong><small>Starts <?= e(format_dt($upcomingJob['start_at']??null)) ?></small></div><span class="v54-status-pill warn">Upcoming</span></div></div><?php else: ?><div class="v54-empty">No active or upcoming maintenance.</div><?php endif; ?></div></article>
 <?php elseif ($widget === 'incidents'): ?>
