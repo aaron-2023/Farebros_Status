@@ -1,0 +1,4 @@
+/* v5.6 - the hero is the single source of public status messaging */
+.v56-public-override{display:inline-block;margin:11px 0 0;padding:5px 9px;border-radius:999px;border:1px solid rgba(255,205,111,.27);background:rgba(255,205,111,.075);font-size:.7rem;font-weight:800;color:#ffdaa0}
+.v56-public-override[hidden]{display:none!important}
+.sp-status-main #overallStatusMessage{max-width:750px;line-height:1.5}

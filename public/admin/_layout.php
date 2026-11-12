@@ -53,8 +53,9 @@ function admin_page_start(string $active, string $title, string $subtitle, strin
     <link rel="stylesheet" href="/assets/css/admin-v52.css?v=5.3.0">
     <link rel="stylesheet" href="/assets/css/admin-v54.css?v=5.4.0">
     <link rel="stylesheet" href="/assets/css/admin-v55.css?v=5.5.4">
+    <link rel="stylesheet" href="/assets/css/admin-v56.css?v=5.6.0">
 </head>
-<body class="admin-pro v54-admin v55-admin">
+<body class="admin-pro v54-admin v55-admin v56-admin">
 <button class="v54-mobile-menu" type="button" data-admin-menu-toggle aria-label="Open navigation" aria-expanded="false">☰</button>
 <div class="v54-sidebar-scrim" data-admin-menu-close></div>
 <aside class="pro-sidebar v54-sidebar" id="adminSidebar">
@@ -71,16 +72,17 @@ function admin_page_start(string $active, string $title, string $subtitle, strin
         </div>
 
         <div class="v554-nav-group">
-            <div class="v554-nav-heading">Status Management</div>
+            <div class="v554-nav-heading">Manage Status</div>
             <?php admin_nav_item('websites', $active, '/admin/websites.php', 'websites', 'Websites'); ?>
             <?php admin_nav_item('operations', $active, '/admin/operations.php', 'groups', 'Groups & Dependencies'); ?>
             <?php admin_nav_item('announcements', $active, '/admin/announcements.php', 'announcements', 'Announcements'); ?>
             <?php admin_nav_item('incidents', $active, '/admin/incidents.php', 'incidents', 'Incidents'); ?>
             <?php admin_nav_item('maintenance', $active, '/admin/schedules.php', 'maintenance', 'Maintenance'); ?>
+            <?php admin_nav_item('subscribers', $active, '/admin/subscribers.php', 'subscribers', 'Subscribers'); ?>
         </div>
 
         <div class="v554-nav-group">
-            <div class="v554-nav-heading">Monitoring & Reporting</div>
+            <div class="v554-nav-heading">Monitoring</div>
             <?php admin_nav_item('monitoring', $active, '/admin/monitoring.php', 'monitoring', 'Monitor & Activity'); ?>
             <?php admin_nav_item('analytics', $active, '/admin/analytics.php', 'analytics', 'Analytics'); ?>
             <?php admin_nav_item('reports', $active, '/admin/reports.php', 'reports', 'Monthly Reports'); ?>
@@ -88,12 +90,7 @@ function admin_page_start(string $active, string $title, string $subtitle, strin
         </div>
 
         <div class="v554-nav-group">
-            <div class="v554-nav-heading">Communication</div>
-            <?php admin_nav_item('subscribers', $active, '/admin/subscribers.php', 'subscribers', 'Subscribers'); ?>
-        </div>
-
-        <div class="v554-nav-group">
-            <div class="v554-nav-heading">Administration</div>
+            <div class="v554-nav-heading">Settings & Access</div>
             <?php admin_nav_item('settings', $active, '/admin/settings.php', 'settings', 'Settings'); ?>
             <?php admin_nav_item('audit', $active, '/admin/audit-log.php', 'audit', 'Audit Log'); ?>
             <?php admin_nav_item('security', $active, '/admin/change-password.php', 'security', 'Security'); ?>
@@ -104,7 +101,7 @@ function admin_page_start(string $active, string $title, string $subtitle, strin
         <button class="v55-command-open" type="button" data-command-open><span class="v55-footer-icon"><?= admin_nav_icon('search') ?></span><span>Quick Search</span><kbd>Ctrl K</kbd></button>
         <div class="v55-sidebar-meta">
             <a class="v55-signout" href="/admin/logout.php"><span class="v54-nav-icon v55-nav-icon"><?= admin_nav_icon('logout') ?></span><span>Sign Out</span></a>
-            <span class="v55-version">v5.5.4</span>
+            <span class="v55-version">v5.6</span>
         </div>
     </div>
 </aside>
@@ -134,14 +131,7 @@ function admin_page_start(string $active, string $title, string $subtitle, strin
 
 function admin_status_tabs(string $active): void
 {
-    $tabs = [
-        'dashboard' => ['/admin/dashboard.php', 'Overview'],
-        'websites' => ['/admin/websites.php', 'Websites'],
-        'operations' => ['/admin/operations.php', 'Groups'],
-        'announcements' => ['/admin/announcements.php', 'Announcements'],
-        'monitoring' => ['/admin/monitoring.php', 'Monitoring'],
-    ];
-    ?><nav class="v54-tabs" aria-label="Status management"><?php foreach ($tabs as $key => [$href, $label]): ?><a href="<?= e($href) ?>" class="<?= $key === $active ? 'active' : '' ?>"><?= e($label) ?></a><?php endforeach; ?></nav><?php
+    // Main sidebar is the single navigation surface.
 }
 
 function admin_notice(?string $message, string $type = 'success'): void
@@ -188,6 +178,7 @@ function admin_page_end(): void
 </main>
 <script src="/assets/js/admin-v54.js?v=5.4.0"></script>
 <script src="/assets/js/admin-v55.js?v=5.5.4"></script>
+<script src="/assets/js/admin-v56.js?v=5.6.0"></script>
 </body>
 </html>
 <?php

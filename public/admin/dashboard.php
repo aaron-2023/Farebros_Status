@@ -16,8 +16,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     try {
         if ($action === 'update_status_message') {
-            set_setting('status_message', trim((string)($_POST['status_message'] ?? '')));
-            $notice = 'Public status message updated.';
+            $mode = (string)($_POST['status_message_mode'] ?? 'auto');
+            if (!in_array($mode, ['auto', 'manual'], true)) throw new RuntimeException('Invalid message mode.');
+            $message = trim((string)($_POST['status_message'] ?? ''));
+            if ($mode === 'manual' && $message === '') throw new RuntimeException('Enter a custom message before enabling the override.');
+            if ((function_exists('mb_strlen') ? mb_strlen($message) : strlen($message)) > 240) throw new RuntimeException('Keep the status message under 240 characters.');
+            set_setting('status_message', $message);
+            set_setting('status_message_mode', $mode);
+            $notice = $mode === 'auto' ? 'Automatic status messages enabled.' : 'Manual status message enabled.';
             if (platform_sync_enabled()) {
                 $syncNotice = sync_status_snapshot_to_platform('status_message_updated')
                     ? 'Portal sync sent.'
@@ -64,6 +70,9 @@ $activeIncidents = get_active_incidents();
 $monitorSources = get_monitor_source_health();
 $healthySources = array_values(array_filter($monitorSources, static fn(array $source): bool => empty($source['is_stale'])));
 $statusMessage = (string)get_setting('status_message', '');
+$statusMessageMode = (string)($payload['message_mode'] ?? 'auto');
+if ($statusMessageMode === 'auto' && in_array($statusMessage, ['All systems are currently operational.', 'All monitored systems are operational.'], true)) $statusMessage = '';
+$automaticMessage = (string)($payload['automatic_message'] ?? 'All monitored systems are operational.');
 $overall = $payload['overall'];
 $primary = $payload['primary'];
 $lastMonitor = $monitorLogs[0] ?? null;
@@ -71,8 +80,9 @@ $systemHealth = status_system_health();
 $dashboardLayout = get_dashboard_layout((int)$user['id']);
 $dashboardCustomizable = get_setting('dashboard_customization_enabled', '1') === '1';
 
-$operationalWebsites = count(array_filter($websites, static fn(array $site): bool => ($site['current_status'] ?? '') === 'operational'));
-$problemWebsites = count($websites) - $operationalWebsites;
+$operationalWebsites = count(array_filter($payload['websites'], static fn(array $site): bool => ($site['status'] ?? '') === 'operational'));
+$problemWebsites = count($payload['websites']) - $operationalWebsites;
+$effectiveServicesById = array_column($payload['services'], null, 'id');
 $uptimeValues = [];
 foreach ($websites as $website) {
     $uptime = website_uptime_percent((int)$website['id'], 30);
@@ -92,26 +102,24 @@ $widgetLabels = [
 ];
 $hiddenWidgets = array_flip($dashboardLayout['hidden']);
 
-admin_page_start('dashboard','Dashboard','Live operations overview with the controls you need most.','Operations Center',[
+admin_page_start('dashboard','Dashboard','Live status, active issues and the actions that matter.','Operations Center',[
     ['href'=>'/admin/incidents.php','label'=>'New Incident','class'=>'ghost'],
     ['href'=>'/admin/websites.php#add','label'=>'Add Website','class'=>'primary'],
 ]);
-admin_status_tabs('dashboard');
 admin_notice($notice);
 if ($syncNotice) admin_notice($syncNotice, str_contains(strtolower($syncNotice), 'failed') ? 'danger' : 'success');
 admin_notice($error, 'danger');
 ?>
 
 <section class="v54-metrics">
-    <article class="v54-metric"><div class="v54-metric-top"><small>Overall Status</small><span class="v54-status-dot <?= e($severityClass((string)$overall['class'])) ?>"></span></div><strong><?= e((string)$overall['label']) ?></strong><em>Public code <?= e((string)$overall['code']) ?></em></article>
     <article class="v54-metric"><div class="v54-metric-top"><small>Websites</small><span class="v54-status-dot <?= $problemWebsites === 0 ? 'good' : 'warn' ?>"></span></div><strong><?= $operationalWebsites ?> / <?= count($websites) ?> Online</strong><em><?= $problemWebsites ? $problemWebsites . ' need attention' : 'All tracked sites healthy' ?></em></article>
     <article class="v54-metric"><div class="v54-metric-top"><small>Active Incidents</small><span class="v54-status-dot <?= $activeIncidents ? 'bad' : 'good' ?>"></span></div><strong><?= count($activeIncidents) ?></strong><em><?= $activeIncidents ? 'Open incident work' : 'No active incidents' ?></em></article>
     <article class="v54-metric"><div class="v54-metric-top"><small>30-Day Uptime</small><span class="v54-status-dot <?= $averageUptime !== null && $averageUptime >= 99.9 ? 'good' : 'warn' ?>"></span></div><strong><?= $averageUptime !== null ? e(number_format($averageUptime, 3)) . '%' : 'No data' ?></strong><em>Average tracked availability</em></article>
-    <article class="v54-metric"><div class="v54-metric-top"><small>Platform Health</small><span class="v54-status-dot <?= e($systemHealth['overall'] === 'good' ? 'good' : ($systemHealth['overall'] === 'bad' ? 'bad' : 'warn')) ?>"></span></div><strong><?= $systemHealth['overall'] === 'good' ? 'Healthy' : ($systemHealth['overall'] === 'bad' ? 'Problem' : 'Attention') ?></strong><em><?= (int)$systemHealth['bad_count'] ?> critical · <?= (int)$systemHealth['warning_count'] ?> warnings</em></article>
+    <article class="v54-metric"><div class="v54-metric-top"><small>Monitor Sources</small><span class="v54-status-dot <?= count($healthySources) ? 'good' : 'warn' ?>"></span></div><strong><?= count($healthySources) ?> Active</strong><em><?= count($healthySources) >= 2 ? 'Redundant monitoring' : 'Review monitoring coverage' ?></em></article>
 </section>
 
 <div class="v55-dashboard-toolbar">
-    <div><strong>Operations workspace</strong><span>Keep the dashboard focused. Detailed administration stays in its dedicated section.</span></div>
+    <div><strong>Operations overview</strong><span>Live status and the essentials. Use Customize to show additional widgets.</span></div>
     <?php if ($dashboardCustomizable): ?><button class="button ghost" type="button" data-dashboard-customize>Customize Dashboard</button><?php endif; ?>
 </div>
 <?php if ($dashboardCustomizable): ?>
@@ -132,16 +140,27 @@ admin_notice($error, 'danger');
 <article class="pro-card v55-dashboard-widget v55-widget-wide <?= $isHidden ? 'v55-widget-hidden':'' ?>" data-dashboard-widget="status">
     <div class="pro-card-head"><div><h2>Public Status</h2><p>The headline visitors see right now.</p></div><a class="v54-card-link" href="/" target="_blank" rel="noopener">Open Public Page</a></div>
     <div class="v54-card-body">
-        <div class="v54-overall <?= e($severityClass((string)$overall['class'])) ?>"><div class="v54-overall-copy"><span class="v54-overall-icon">✓</span><div><h2><?= e((string)$overall['label']) ?></h2><p><?= $statusMessage !== '' ? e($statusMessage) : 'No custom public status message is currently set.' ?></p></div></div><span class="v54-overall-code">Primary: <?= e((string)$primary['name']) ?> · <?= e((string)$primary['label']) ?></span></div>
-        <form method="post" class="pro-form v55-dashboard-message"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="update_status_message"><label>Public status message</label><div class="pro-form-row"><div><input type="text" name="status_message" value="<?= e($statusMessage) ?>" placeholder="All systems are operating normally."></div><div class="v55-form-action"><button class="button ghost" type="submit">Save Message</button></div></div></form>
+        <div class="v54-overall <?= e($severityClass((string)$overall['class'])) ?>"><div class="v54-overall-copy"><span class="v54-overall-icon"><?= $severityClass((string)$overall['class']) === 'good' ? '✓' : '!' ?></span><div><div class="v56-status-heading"><h2><?= e((string)$overall['label']) ?></h2><span class="v56-mode-badge <?= $statusMessageMode === 'manual' ? 'manual' : '' ?>"><?= $statusMessageMode === 'manual' ? 'Manual message' : 'Automatic message' ?></span></div><p><?= e((string)$payload['message']) ?></p></div></div><span class="v54-overall-code">Primary: <?= e((string)$primary['name']) ?> · <?= e((string)$primary['label']) ?></span></div>
+        <form method="post" class="pro-form v56-message-form" data-status-message-form>
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="update_status_message">
+            <div class="v56-message-head"><div><strong>Public status message</strong><p>Automatic updates follow monitoring, incidents and maintenance. Use a manual message only when necessary.</p></div></div>
+            <div class="v56-message-modes" role="radiogroup" aria-label="Status message behavior">
+                <label class="v56-message-option"><input type="radio" name="status_message_mode" value="auto" <?= $statusMessageMode === 'auto' ? 'checked' : '' ?>><span><strong>Automatic</strong><small>Recommended · updates with monitoring</small></span></label>
+                <label class="v56-message-option"><input type="radio" name="status_message_mode" value="manual" <?= $statusMessageMode === 'manual' ? 'checked' : '' ?>><span><strong>Manual override</strong><small>Show your custom text until disabled</small></span></label>
+            </div>
+            <div class="v56-message-preview" data-status-auto-preview><small>Automatic preview</small><p><?= e($automaticMessage) ?></p></div>
+            <div class="v56-manual-field" data-status-manual-field <?= $statusMessageMode !== 'manual' ? 'hidden' : '' ?>><label for="statusManualMessage">Custom message</label><textarea id="statusManualMessage" name="status_message" maxlength="240" rows="2" placeholder="Enter a public-facing status update…" <?= $statusMessageMode === 'manual' ? 'required' : '' ?>><?= e($statusMessage) ?></textarea><small>This changes only the message. Monitored statuses and outage indicators still update automatically.</small></div>
+            <div class="v56-message-actions"><button class="button primary" type="submit">Save Message Settings</button><span><?= $statusMessageMode === 'manual' ? 'Manual override active' : 'Updates automatically' ?></span></div>
+        </form>
     </div>
 </article>
 <?php elseif ($widget === 'services'): ?>
 <article class="pro-card v55-dashboard-widget v55-widget-wide <?= $isHidden ? 'v55-widget-hidden':'' ?>" data-dashboard-widget="services">
     <div class="pro-card-head"><div><h2>Service Status</h2><p>Core platform services. Expand only when you need to publish a manual change.</p></div><a class="v54-card-link" href="/admin/operations.php">Groups & Dependencies</a></div>
     <div class="v54-card-body v54-service-list">
-        <?php foreach ($services as $service): $meta=status_meta((string)$service['current_status']); $sev=$severityClass((string)$meta['class']); ?>
-        <div class="v54-service-row" id="service-<?= (int)$service['id'] ?>"><div class="v54-service-summary"><div class="v54-service-name"><span class="v54-status-dot <?= e($sev) ?>"></span><div><strong><?= e((string)$service['service_name']) ?></strong><small><?= e((string)($service['description'] ?? '')) ?></small></div></div><span class="v54-status-pill <?= e($sev === 'good' ? '' : $sev) ?>"><?= e((string)$meta['label']) ?></span></div>
+        <?php foreach ($services as $service): $effective=$effectiveServicesById[(int)$service['id']] ?? []; $meta=status_meta((string)($effective['status'] ?? $service['current_status'])); $sev=$severityClass((string)$meta['class']); ?>
+        <div class="v54-service-row" id="service-<?= (int)$service['id'] ?>"><div class="v54-service-summary"><div class="v54-service-name"><span class="v54-status-dot <?= e($sev) ?>"></span><div><strong><?= e((string)$service['service_name']) ?></strong><small><?= e((string)($service['description'] ?? '')) ?></small><?php if (!empty($effective['dependency_affected'])): ?><small class="v56-dependency-note">Affected by an upstream dependency</small><?php endif; ?></div></div><span class="v54-status-pill <?= e($sev === 'good' ? '' : $sev) ?>"><?= e((string)$meta['label']) ?></span></div>
         <details class="v54-service-edit"><summary>Change public status</summary><form method="post" class="pro-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="update_service"><input type="hidden" name="service_id" value="<?= (int)$service['id'] ?>"><div class="pro-form-row"><div><label>Status</label><select name="new_status"><?php foreach (STATUS_OPTIONS as $value=>$option): ?><option value="<?= e($value) ?>" <?= $value===$service['current_status']?'selected':'' ?>><?= e((string)$option['label']) ?></option><?php endforeach; ?></select></div><div><label>Public update title</label><input type="text" name="update_title" placeholder="Optional; generated automatically"></div></div><label>Public details</label><input type="text" name="update_message" placeholder="Brief detail for visitors"><div class="pro-actions"><button class="button primary" type="submit">Publish Status Change</button></div></form></details></div>
         <?php endforeach; ?>
     </div>

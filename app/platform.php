@@ -436,7 +436,7 @@ function platform_enrich_public_payload(array $payload): array
     }, array_values(array_filter(get_status_dependencies(), static fn(array $d): bool => (int)$d['is_active'] === 1)));
     if (!empty($payload['incidents']['active'])) $payload['incidents']['active'] = array_map('public_incident_view', $payload['incidents']['active']);
     if (!empty($payload['incidents']['recent'])) $payload['incidents']['recent'] = array_map('public_incident_view', $payload['incidents']['recent']);
-    return $payload;
+    return finalize_status_message($payload);
 }
 
 function normalize_subscription_event(string $event): string
@@ -615,11 +615,16 @@ function set_admin_preference(int $userId, string $key, string $value): void
 
 function get_dashboard_layout(int $userId): array
 {
-    $default = ['status', 'services', 'quick_actions', 'system_health', 'maintenance', 'incidents', 'announcements', 'monitoring', 'primary'];
+    $default = ['status', 'incidents', 'maintenance', 'services', 'monitoring', 'quick_actions', 'system_health', 'announcements', 'primary'];
+    $defaultHidden = ['system_health', 'announcements', 'primary'];
     $stored = get_admin_preference($userId, 'dashboard_layout', '');
-    if ($stored === '') return ['order' => $default, 'hidden' => []];
+    if ($stored === '') return ['order' => $default, 'hidden' => $defaultHidden];
     $decoded = json_decode($stored, true);
-    if (!is_array($decoded)) return ['order' => $default, 'hidden' => []];
+    if (!is_array($decoded)) return ['order' => $default, 'hidden' => $defaultHidden];
+    $oldDefault = ['status', 'services', 'quick_actions', 'system_health', 'maintenance', 'incidents', 'announcements', 'monitoring', 'primary'];
+    if (($decoded['order'] ?? []) === $oldDefault && empty($decoded['hidden'])) {
+        return ['order' => $default, 'hidden' => $defaultHidden];
+    }
     $allowed = $default;
     $order = array_values(array_unique(array_filter($decoded['order'] ?? [], static fn($v): bool => in_array($v, $allowed, true))));
     foreach ($allowed as $key) if (!in_array($key, $order, true)) $order[] = $key;
