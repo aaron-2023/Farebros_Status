@@ -101,7 +101,8 @@ function post_json_to_platform(string $eventType, array $payload): bool
 
 function sync_status_snapshot_to_platform(string $eventType = 'status_snapshot'): bool
 {
-    return post_json_to_platform($eventType, public_status_payload());
+    require_once __DIR__ . '/platform.php';
+    return post_json_to_platform($eventType, platform_enrich_public_payload(public_monitoring_enrichment(public_status_payload())));
 }
 
 function get_sync_logs(int $limit = 25): array

@@ -35,17 +35,6 @@ function incidentTargetsLabel(targets=[]){
     return names.length?names.join(', '):'General status';
 }
 
-function statusPageMessage(data){
-    const incidents=data.incidents?.active||[];
-    if(incidents.length===1) return 'One active incident is currently being tracked.';
-    if(incidents.length>1) return `${incidents.length} active incidents are currently being tracked.`;
-    const schedule=data.schedule;
-    if(schedule?.phase==='active') return 'A scheduled maintenance window is currently active.';
-    if(schedule?.phase==='upcoming') return 'A scheduled maintenance window is upcoming. Current live status is still shown below.';
-    if(data.overall?.status==='operational') return 'All monitored systems are operational.';
-    if(data.primary?.status!=='operational') return 'The primary Fare Brothers website is reporting an issue.';
-    return 'One or more monitored systems are reporting an issue.';
-}
 
 function renderServiceRow(item,data){
     const overlay=item.schedule_overlay?`<span class="sp-maint-badge ${escapeHtml(item.schedule_overlay.phase)}">${escapeHtml(item.schedule_overlay.label)}</span>`:'';
@@ -108,11 +97,6 @@ function renderGroups(data){
     }).join('');
 }
 
-function renderNotice(data){
-    const region=document.getElementById('statusNoticeRegion');
-    if(!region) return;
-    region.innerHTML=data.message?`<section class="sp-notice"><strong>Status Message</strong><p>${escapeHtml(data.message)}</p></section>`:'';
-}
 
 function renderSchedule(data){
     const region=document.getElementById('scheduleRegion');
@@ -155,7 +139,9 @@ function updateSummary(data){
     if(card) card.className=`sp-status-card ${data.overall.class}`;
     const set=(id,value)=>{const el=document.getElementById(id);if(el) el.textContent=value;};
     set('overallStatusLabel',data.overall.label);
-    set('overallStatusMessage',statusPageMessage(data));
+    set('overallStatusMessage',data.message||'');
+    const override=document.getElementById('statusMessageOverride');
+    if(override) override.hidden=data.message_mode!=='manual';
     set('overallStatusCode',String(data.overall.code));
     set('overallUpdatedAt',formatDate(data.generated_at,data));
     set('overallTimezone',data.timezone_label||data.timezone||'');
@@ -195,7 +181,6 @@ function wireHistoryControls(){
 function applyPayload(data){
     lastPayload=data;
     updateSummary(data);
-    renderNotice(data);
     renderSchedule(data);
     renderIncidents(data);
     renderGroups(data);

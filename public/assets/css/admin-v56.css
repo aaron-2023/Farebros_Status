@@ -1,0 +1,50 @@
+/* v5.6 - calmer admin workspace with a single navigation surface */
+.v56-admin .v54-topbar{margin-bottom:22px;border-bottom:1px solid rgba(129,173,225,.09);background:transparent;box-shadow:none}
+.v56-admin .v54-heading h1{letter-spacing:-.035em}
+.v56-admin .v54-heading p{max-width:720px}
+.v56-admin .v54-main{max-width:none}
+.v56-admin .v54-metrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin-bottom:16px}
+.v56-admin .v54-metric{border-radius:12px;padding:16px 17px;background:#0d1d2e;box-shadow:none}
+.v56-admin .v54-metric strong{font-size:1.12rem;margin-top:10px}
+.v56-admin .v55-dashboard-toolbar{padding:10px 2px;margin-bottom:14px;border:0;border-radius:0;background:transparent}
+.v56-admin .v55-dashboard-toolbar strong{font-size:.8rem}
+.v56-admin .v55-dashboard-toolbar span{font-size:.7rem;color:#8ba2bb}
+.v56-admin .v55-dashboard-grid{gap:13px}
+.v56-admin .v55-dashboard-widget{border-radius:12px;box-shadow:none}
+.v56-admin .v55-dashboard-widget .pro-card-head{padding-bottom:12px}
+.v56-admin .v55-dashboard-widget .pro-card-head h2{font-size:.96rem}
+.v56-admin .v55-dashboard-widget .pro-card-head p{font-size:.7rem}
+.v56-admin .v54-overall{padding:17px;border-radius:11px}
+.v56-status-heading{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.v56-mode-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid rgba(120,174,223,.15);border-radius:999px;background:rgba(120,174,223,.07);color:#a6c1dd;font-size:.63rem;font-weight:800;white-space:nowrap}
+.v56-mode-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:#52d5a3}
+.v56-mode-badge.manual{color:#ffda90;border-color:rgba(250,194,98,.25);background:rgba(250,194,98,.07)}
+.v56-mode-badge.manual:before{background:#f4c469}
+.v56-message-form{margin-top:15px;border-top:1px solid rgba(129,173,225,.1);padding-top:16px}
+.v56-message-head strong{display:block;font-size:.8rem;color:#dae9f7}
+.v56-message-head p{margin:5px 0 14px;color:#819ab4;font-size:.72rem;line-height:1.55}
+.v56-message-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.v56-message-option{display:flex!important;align-items:center!important;gap:11px;min-width:0;padding:13px 14px;border:1px solid rgba(129,173,225,.13);border-radius:10px;background:rgba(255,255,255,.015);cursor:pointer;text-transform:none!important;letter-spacing:normal!important}
+.v56-message-option:has(input:checked){border-color:rgba(60,155,255,.52);background:rgba(47,140,255,.065)}
+.v56-message-option input{appearance:auto!important;width:17px!important;min-width:17px!important;height:17px!important;min-height:17px!important;padding:0!important;margin:0!important;accent-color:#388efa}
+.v56-message-option strong,.v56-message-option small{display:block}
+.v56-message-option strong{font-size:.73rem;color:#dae9f7}
+.v56-message-option small{margin-top:3px;font-size:.66rem;color:#829bb5;line-height:1.4}
+.v56-message-preview,.v56-manual-field{margin-top:12px;border:1px solid rgba(129,173,225,.1);border-radius:10px;background:rgba(7,19,32,.5);padding:12px 14px}
+.v56-message-preview small,.v56-manual-field>small{font-size:.68rem;color:#819bb5}
+.v56-message-preview p{margin:5px 0 0;font-size:.76rem;color:#d7e8f8;line-height:1.5}
+.v56-manual-field label{display:block;margin-bottom:7px}
+.v56-manual-field textarea{width:100%;resize:vertical;line-height:1.45}
+.v56-manual-field>small{display:block;margin-top:7px;line-height:1.5}
+.v56-message-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:14px}
+.v56-message-actions span{font-size:.68rem;color:#849eb8}
+.v56-admin .v54-service-row{background:transparent;border-radius:8px}
+.v56-admin .v54-service-summary{padding:2px 0}
+.v56-admin .v54-service-edit summary{font-weight:700}
+.v56-admin .v55-quick-actions a{border-radius:9px}
+/* hidden wins over display rules for the mode switch */
+.v56-admin [hidden]{display:none!important}
+@media(max-width:1250px){.v56-admin .v54-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){.v56-message-modes{grid-template-columns:1fr}.v56-admin .v54-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.v56-admin .v54-overall{display:block}}
+@media(max-width:440px){.v56-admin .v54-metrics{grid-template-columns:1fr}.v56-message-actions .button{width:100%}}
+.v56-dependency-note{color:#ffd28a!important;margin-top:4px!important}

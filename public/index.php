@@ -30,16 +30,6 @@ foreach ($payload['websites'] as $site) {
     if ($check && ($lastWebsiteCheck === null || strtotime($check) > strtotime($lastWebsiteCheck))) $lastWebsiteCheck = $check;
 }
 
-function page_status_message(array $overall, array $primary, ?array $schedule, array $incidents = []): string
-{
-    if ($incidents) return count($incidents) === 1 ? 'One active incident is currently being tracked.' : count($incidents) . ' active incidents are currently being tracked.';
-    if ($schedule && ($schedule['phase'] ?? '') === 'active') return 'A scheduled maintenance window is currently active.';
-    if ($schedule && ($schedule['phase'] ?? '') === 'upcoming') return 'A scheduled maintenance window is upcoming. Current live status is still shown below.';
-    if (($overall['status'] ?? '') === 'operational') return 'All monitored systems are operational.';
-    if (($primary['status'] ?? '') !== 'operational') return 'The primary Fare Brothers website is reporting an issue.';
-    return 'One or more monitored systems are reporting an issue.';
-}
-
 function item_schedule_overlay(string $type, int $id): ?array
 {
     return function_exists('current_schedule_for_item') ? current_schedule_for_item($type, $id) : null;
@@ -84,17 +74,17 @@ function incident_targets_label(array $targets): string
     <link rel="stylesheet" href="/assets/css/statuspage-v52.css?v=5.2.0">
     <link rel="stylesheet" href="/assets/css/statuspage-v53.css?v=5.3.0">
     <link rel="stylesheet" href="/assets/css/statuspage-v55.css?v=5.5.0">
+    <link rel="stylesheet" href="/assets/css/statuspage-v56.css?v=5.6.0">
 </head>
 <body>
 <header class="sp-top"><div class="sp-wrap sp-top-inner"><a class="sp-brand" href="/"><img src="/assets/img/fare-brothers-logo.png" alt="Fare Brothers logo"><span><strong>Fare Brothers</strong><small><?= e($statusPageLabel) ?></small></span></a><nav class="sp-nav"><a href="https://farebros.com">Main Website</a><?php if(!empty($payload['groups'])): ?><a href="#groups">Groups</a><?php endif; ?><a href="#systems">Systems</a><a href="#websites">Websites</a><a href="/history.php">History</a><?php if(get_setting('public_subscriptions_enabled','1')==='1'): ?><a href="/subscribe.php">Subscribe</a><?php endif; ?><?php if ($showAdminLink): ?><a class="sp-admin" href="/admin/login.php">Admin</a><?php endif; ?></nav></div></header>
 
 <main class="sp-wrap">
     <section class="sp-status-card <?= e($overall['class']) ?>" id="overallStatusCard" aria-live="polite">
-        <div class="sp-status-main"><span class="sp-dot"></span><div><div class="sp-label">Current Status</div><h1 id="overallStatusLabel"><?= e($overall['label']) ?></h1><p id="overallStatusMessage"><?= e(page_status_message($overall, $primary, $activeSchedule, $activeIncidents)) ?></p><span class="sp-live"><i></i><span id="liveRefreshLabel">Live monitoring · refreshes every <?= (int)($payload['refresh_seconds'] ?? 15) ?>s</span></span></div></div>
+        <div class="sp-status-main"><span class="sp-dot"></span><div><div class="sp-label">Current Status</div><h1 id="overallStatusLabel"><?= e($overall['label']) ?></h1><p id="overallStatusMessage"><?= e((string)$payload['message']) ?></p><span class="v56-public-override" id="statusMessageOverride" <?= ($payload['message_mode'] ?? 'auto') === 'manual' ? '' : 'hidden' ?>>Custom status message</span><span class="sp-live"><i></i><span id="liveRefreshLabel">Live monitoring · refreshes every <?= (int)($payload['refresh_seconds'] ?? 15) ?>s</span></span></div></div>
         <div class="sp-meta"><div><small>Status Code</small><strong id="overallStatusCode"><?= e((string)$overall['code']) ?></strong></div><div><small>Last Updated</small><strong id="overallUpdatedAt"><?= e(format_dt($payload['generated_at'])) ?></strong></div><div><small>Timezone</small><strong id="overallTimezone"><?= e($payload['timezone_label'] ?? '') ?></strong></div></div>
     </section>
 
-    <div id="statusNoticeRegion"><?php if (!empty($payload['message'])): ?><section class="sp-notice"><strong>Status Message</strong><p><?= e($payload['message']) ?></p></section><?php endif; ?></div>
 
     <div id="scheduleRegion"><?php if ($activeSchedule): ?><section class="sp-schedule <?= e($activeSchedule['phase']) ?>"><div><strong><?= ($activeSchedule['phase'] ?? '') === 'active' ? 'Maintenance In Progress' : 'Upcoming Maintenance' ?></strong><h2><?= e($activeSchedule['title'] ?? 'Scheduled Maintenance') ?></h2><p><?= e($activeSchedule['details'] ?? '') ?></p></div><div class="sp-schedule-time"><span><?= e(format_dt($activeSchedule['start_at'] ?? '')) ?></span><em>to</em><span><?= e(format_dt($activeSchedule['end_at'] ?? '')) ?></span></div></section><?php endif; ?></div>
 
@@ -147,6 +137,6 @@ function incident_targets_label(array $targets): string
 
 <footer class="sp-footer sp-wrap"><span>© <?= date('Y') ?> <?= e($companyName) ?></span><span>Independent offsite status page</span></footer>
 <script>window.STATUS_REFRESH_SECONDS = <?= (int)($payload['refresh_seconds'] ?? 15) ?>; window.STATUS_HISTORY_DAYS = <?= (int)($payload['monitoring']['default_history_days'] ?? 90) ?>;</script>
-<script src="/assets/js/statuspage-v55.js?v=5.5.0"></script>
+<script src="/assets/js/statuspage-v55.js?v=5.6.0"></script>
 </body>
 </html>

@@ -280,7 +280,7 @@ function seed_default_websites(): void
 function seed_default_settings(): void
 {
     $defaults = [
-        'status_message' => 'All systems are currently operational.',
+        'status_message' => '',
         'public_banner' => '',
         'site_timezone' => 'America/Detroit',
         'time_format' => '12h',
@@ -703,6 +703,79 @@ function get_overall_status(array $services, array $websites = []): string
     return 'operational';
 }
 
+/** Public copy is based on the effective states, not the stored default text. */
+function automatic_status_message(array $payload): string
+{
+    $overall = (string)($payload['overall']['status'] ?? 'operational');
+    $problems = [];
+    foreach (['services', 'websites'] as $type) {
+        foreach (($payload[$type] ?? []) as $item) {
+            if (($item['status'] ?? 'operational') !== 'operational') {
+                $problems[] = [
+                    'name' => trim((string)($item['name'] ?? 'Monitored system')),
+                    'status' => (string)$item['status'],
+                ];
+            }
+        }
+    }
+
+    $activeIncidents = $payload['incidents']['active'] ?? [];
+    $incidentCount = count($activeIncidents);
+    $schedule = $payload['schedule'] ?? null;
+    if (!$schedule && function_exists('active_job_payload')) {
+        $job = active_job_payload();
+        if ($job) $schedule = ['phase' => 'active'];
+    }
+
+    if ($problems) {
+        $names = array_slice(array_column($problems, 'name'), 0, 2);
+        $targets = implode(' and ', $names);
+        $remaining = count($problems) - count($names);
+        if ($remaining > 0) $targets .= ' and ' . $remaining . ' more';
+        $one = count($problems) === 1;
+        $firstStatus = $problems[0]['status'];
+        if ($one && in_array($firstStatus, ['maintenance', 'planned_maintenance'], true)) {
+            $message = ($firstStatus === 'maintenance' ? 'Maintenance in progress for ' : 'Planned maintenance for ') . $targets . '.';
+        } elseif ($one) {
+            $label = strtolower((string)status_meta($firstStatus)['label']);
+            $message = $targets . ' is reporting ' . $label . '.';
+        } elseif (in_array($overall, ['planned_maintenance', 'maintenance'], true)) {
+            $message = 'Maintenance is affecting ' . $targets . '.';
+        } elseif (in_array($overall, ['major_outage', 'offline'], true)) {
+            $message = 'Service disruption affecting ' . $targets . '.';
+        } else {
+            $message = 'Issues detected with ' . $targets . '.';
+        }
+        if ($incidentCount) $message .= ' ' . $incidentCount . ' active incident' . ($incidentCount === 1 ? '' : 's') . '.';
+        return $message;
+    }
+
+    if ($incidentCount) {
+        return $incidentCount === 1
+            ? 'An active incident is being investigated. See the details below.'
+            : $incidentCount . ' active incidents are being investigated. See the details below.';
+    }
+    if ($schedule && ($schedule['phase'] ?? '') === 'active') return 'Scheduled maintenance is currently in progress.';
+    if ($overall !== 'operational') {
+        return (string)status_meta($overall)['label'] . ' is being reported. See the details below.';
+    }
+    return 'All monitored systems are operational.';
+}
+
+function finalize_status_message(array $payload): array
+{
+    $automatic = automatic_status_message($payload);
+    $manual = trim((string)get_setting('status_message', ''));
+    $mode = get_setting('status_message_mode', null);
+    $legacyCustom = $mode === null && $manual !== ''
+        && !in_array($manual, ['All systems are currently operational.', 'All monitored systems are operational.'], true);
+    $useManual = $manual !== '' && ($mode === 'manual' || $legacyCustom);
+    $payload['automatic_message'] = $automatic;
+    $payload['message_mode'] = $useManual ? 'manual' : 'auto';
+    $payload['message'] = $useManual ? $manual : $automatic;
+    return $payload;
+}
+
 function public_status_payload(): array
 {
     ensure_core_schema();
@@ -722,7 +795,7 @@ function public_status_payload(): array
         $refreshSeconds = 5;
     }
 
-    return [
+    $payload = [
         'app' => APP_NAME,
         'brand' => APP_BRAND,
         'generated_at' => site_now()->format(DateTimeInterface::ATOM),
@@ -750,7 +823,7 @@ function public_status_payload(): array
             'status_page_label' => get_setting('status_page_label', 'Status Center'),
             'time_format' => site_time_format(),
         ],
-        'message' => get_setting('status_message', 'All systems are currently operational.'),
+        'message' => '',
         'services' => array_map(function ($service) {
             $meta = status_meta($service['current_status']);
 
@@ -794,4 +867,5 @@ function public_status_payload(): array
         'recent_updates' => get_recent_updates(10),
         'refresh_seconds' => $refreshSeconds,
     ];
+    return finalize_status_message($payload);
 }
