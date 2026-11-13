@@ -634,7 +634,7 @@ function get_dashboard_layout(int $userId): array
 
 function save_dashboard_layout(int $userId, array $order, array $hidden): void
 {
-    $allowed = ['status', 'services', 'quick_actions', 'system_health', 'maintenance', 'incidents', 'announcements', 'monitoring', 'primary'];
+    $allowed = ['status', 'services', 'quick_actions', 'system_health', 'cloudflare', 'maintenance', 'incidents', 'announcements', 'monitoring', 'primary'];
     $order = array_values(array_unique(array_filter($order, static fn($v): bool => is_string($v) && in_array($v, $allowed, true))));
     foreach ($allowed as $key) if (!in_array($key, $order, true)) $order[] = $key;
     $hidden = array_values(array_unique(array_filter($hidden, static fn($v): bool => is_string($v) && in_array($v, $allowed, true))));

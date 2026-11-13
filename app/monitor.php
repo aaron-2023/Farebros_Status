@@ -5,6 +5,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/incidents.php';
+require_once __DIR__ . '/cloudflare_failover.php';
 
 function ensure_monitor_schema(): void
 {
@@ -145,6 +146,7 @@ function check_http_health(array $website): array
     $error = curl_error($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+    $effectiveUrl = (string)curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
     curl_close($ch);
     $ms = (int)round((microtime(true) - $started) * 1000);
 
@@ -153,6 +155,17 @@ function check_http_health(array $website): array
     }
 
     $body = substr((string)$raw, $headerSize);
+
+    // The public emergency redirect is not a healthy response for the primary site.
+    // This also prevents a redirect to status.farebros.com from being mistaken for
+    // recovery before the Cloudflare monitor-bypass rule is prepared.
+    if ((int)($website['is_primary'] ?? 0) === 1) {
+        $effectiveHost = strtolower((string)(parse_url($effectiveUrl, PHP_URL_HOST) ?: ''));
+        if ($effectiveHost === 'status.farebros.com') {
+            return ['online' => false, 'result' => 'offline', 'http_code' => $code, 'error' => 'Primary website redirected to the offsite status page.', 'response_ms' => $ms, 'ssl_days_remaining' => null, 'monitor_type' => 'http'];
+        }
+    }
+
     $expectedCode = (int)($website['expected_http_code'] ?? 0);
     if ($expectedCode > 0 && $code !== $expectedCode) {
         return ['online' => false, 'result' => 'offline', 'http_code' => $code, 'error' => 'Expected HTTP ' . $expectedCode . ', received HTTP ' . $code . '.', 'response_ms' => $ms, 'ssl_days_remaining' => null, 'monitor_type' => 'http'];
@@ -432,7 +445,19 @@ function website_has_active_scheduled_status(int $websiteId): bool
     }
 
     $now = gmdate('Y-m-d H:i:s');
-    $stmt = db()->prepare('\n        SELECT 1 FROM scheduled_jobs\n        WHERE is_active = 1\n          AND has_completed = 0\n          AND start_at <= ?\n          AND end_at > ?\n          AND (\n              scope = "all"\n              OR scope = "websites"\n              OR (scope = "single_website" AND target_id = ?)\n          )\n        LIMIT 1\n    ');
+    $stmt = db()->prepare('
+        SELECT 1 FROM scheduled_jobs
+        WHERE is_active = 1
+          AND has_completed = 0
+          AND start_at <= ?
+          AND end_at > ?
+          AND (
+              scope = "all"
+              OR scope = "websites"
+              OR (scope = "single_website" AND target_id = ?)
+          )
+        LIMIT 1
+    ');
     $stmt->execute([$now, $now, $websiteId]);
     return (bool)$stmt->fetchColumn();
 }
@@ -534,7 +559,18 @@ function run_all_monitors(): array
         if ((int)($website['monitor_enabled'] ?? 1) !== 1) {
             continue;
         }
-        $out[] = apply_website_monitor_result($website, run_website_health_check($website), 'local');
+
+        $rawResult = run_website_health_check($website);
+        $applied = apply_website_monitor_result($website, $rawResult, 'local');
+
+        // Automatic Cloudflare failover is intentionally driven only by the local
+        // offsite check of the primary website. Cloudflare/API errors are isolated
+        // inside the failover helper and never stop normal status monitoring.
+        if ((int)($website['is_primary'] ?? 0) === 1) {
+            $applied['cloudflare_failover'] = cloudflare_failover_process_result($website, $rawResult);
+        }
+
+        $out[] = $applied;
     }
 
     return ['ok' => true, 'checked_at' => date('c'), 'results' => $out];
